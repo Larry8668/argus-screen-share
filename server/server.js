@@ -4,6 +4,7 @@ const express = require("express");
 const path = require("path");
 const cors = require("cors");
 const localtunnel = require("localtunnel");
+const logger = require("./logger");
 
 const app = express();
 const PORT = 3000;
@@ -20,6 +21,7 @@ function generateAccessCode() {
 
 let accessCode = generateAccessCode();
 let tunnelDomain = null;
+let tunnelUrl = null;
 
 // Configure CORS - must be before static file serving
 app.use(cors({
@@ -68,7 +70,7 @@ app.use((req, res, next) => {
 app.use(express.static(path.join(process.cwd(), "public")));
 
 app.listen(PORT, async () => {
-  console.log(`Server running at http://localhost:${PORT}`);
+  logger.logSuccess(`Server running at http://localhost:${PORT}`);
   
   // Create localtunnel
   try {
@@ -77,26 +79,27 @@ app.listen(PORT, async () => {
     // Extract domain from tunnel URL (e.g., "true-mugs-swim" from "https://true-mugs-swim.loca.lt")
     const url = new URL(tunnel.url);
     tunnelDomain = url.hostname.split('.')[0];
+    tunnelUrl = tunnel.url;
     
-    console.log(`\n🌐 Tunnel created: ${tunnel.url}`);
-    console.log(`🔑 Access Code: ${accessCode}`);
-    console.log(`📋 Connection Info:`);
-    console.log(`   Domain: ${tunnelDomain}`);
-    console.log(`   Code: ${accessCode}`);
-    console.log(`📺 Stream URL: ${tunnel.url}/stream.m3u8?code=${accessCode}\n`);
+    // Initialize logger with connection info
+    logger.initLogger(accessCode, tunnelDomain, tunnelUrl);
+    
+    // Display connection info in a nice box
+    logger.displayConnectionInfo();
     
     tunnel.on('close', () => {
-      console.log('Tunnel closed');
+      logger.logError('Tunnel closed');
     });
     
     // Handle graceful shutdown
     process.on('SIGINT', () => {
+      logger.logInfo('\n\nShutting down...');
       tunnel.close();
       process.exit();
     });
   } catch (error) {
-    console.error('Failed to create tunnel:', error);
-    console.log('Server still running on localhost - tunnel creation failed');
+    logger.logError(`Failed to create tunnel: ${error.message}`);
+    logger.logInfo('Server still running on localhost - tunnel creation failed');
   }
 });
 
@@ -131,6 +134,6 @@ const ffmpegArgs = [
 
 const ffmpeg = spawn("ffmpeg", ffmpegArgs);
 
-ffmpeg.stdout.on("data", data => console.log(`FFmpeg: ${data}`));
-ffmpeg.stderr.on("data", data => console.error(`FFmpeg: ${data}`));
-ffmpeg.on("close", code => console.log(`FFmpeg exited with code ${code}`));
+ffmpeg.stdout.on("data", data => logger.logFFmpeg(data, false));
+ffmpeg.stderr.on("data", data => logger.logFFmpeg(data, true));
+ffmpeg.on("close", code => logger.logFFmpegExit(code));
