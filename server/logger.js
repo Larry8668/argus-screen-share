@@ -1,4 +1,4 @@
-// logger.js - Logging utilities for the server
+// Argus Logger - TUI logging and display utilities
 const chalk = require("chalk");
 const blessed = require("blessed");
 
@@ -25,7 +25,7 @@ function displayConnectionInfo() {
   // Create blessed screen
   screen = blessed.screen({
     smartCSR: true,
-    title: 'Screen Share Server'
+    title: 'Argus Server'
   });
   
   // Connection info box (fixed at top)

@@ -1,6 +1,8 @@
-# Screen Share
+# Argus
 
-A real-time screen sharing application that streams your screen using FFmpeg and displays it in a React web app via HLS (HTTP Live Streaming).
+**Argus** - Named after the hundred-eyed watchman of Greek mythology, Argus is a real-time screen sharing application that streams your screen using FFmpeg and displays it in a React web app via HLS (HTTP Live Streaming).
+
+Just like Argus could see everything with his many eyes, this application lets you share and view your screen from anywhere.
 
 ## How It Works
 
@@ -80,7 +82,7 @@ sudo dnf install ffmpeg
 
 ```bash
 git clone <repository-url>
-cd screen-share
+cd argus
 ```
 
 ### 2. Install server dependencies
@@ -159,9 +161,10 @@ The React app will open in your browser (typically `http://localhost:5173`).
 ## Project Structure
 
 ```
-screen-share/
+argus/
 ├── server/
 │   ├── server.js          # Express server + FFmpeg streaming
+│   ├── logger.js          # TUI logging utilities
 │   ├── package.json
 │   └── public/            # HLS segments (generated, gitignored)
 │       └── index.html     # Alternative HTML player
@@ -171,6 +174,11 @@ screen-share/
     │   └── ...
     └── package.json
 ```
+
+## Component READMEs
+
+- **[Server README](server/README.md)** - Server setup and configuration
+- **[Client README](client/README.md)** - Client setup and usage
 
 ## Configuration
 

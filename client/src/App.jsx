@@ -135,8 +135,9 @@ export default function App() {
   return (
     <div className="w-full min-h-screen flex flex-col items-center px-4 py-8 max-w-[1400px] mx-auto">
       <h1 className="text-[clamp(2rem,5vw,3rem)] font-bold mb-12 text-center tracking-tight bg-gradient-to-br from-white to-white/70 bg-clip-text text-transparent">
-        Screen Share Stream
+        Argus
       </h1>
+      <p className="text-white/60 text-sm mb-8 -mt-8">Screen Share Stream</p>
       
       {!isConnected ? (
         <div className="w-full max-w-[480px] mx-auto p-10 bg-[#1f1f1f] border border-white/10 rounded-2xl shadow-2xl backdrop-blur-sm">

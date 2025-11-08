@@ -1,4 +1,4 @@
-// server.js
+// Argus Server - Screen sharing with HLS streaming
 const { spawn } = require("child_process");
 const express = require("express");
 const path = require("path");
