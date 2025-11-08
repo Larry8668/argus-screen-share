@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Live Screen</title>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.4.0/dist/hls.min.js"></script>
+</head>
+<body>
+  <h1>Live Screen</h1>
+  <video id="video" controls autoplay muted width="720"></video>
+
+  <script>
+    const video = document.getElementById('video');
+    const hlsUrl = '/stream.m3u8';
+
+    if (Hls.isSupported()) {
+      const hls = new Hls();
+      hls.loadSource(hlsUrl);
+      hls.attachMedia(video);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        video.play().catch(err => console.log('Autoplay blocked, click video:', err));
+      });
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = hlsUrl;
+      video.addEventListener('loadedmetadata', () => video.play());
+    }
+  </script>
+</body>
+</html>
