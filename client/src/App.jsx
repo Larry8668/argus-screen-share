@@ -1,6 +1,5 @@
 import Hls from "hls.js";
 import { useEffect, useRef, useState } from "react";
-import "./App.css";
 
 export default function App() {
   const videoRef = useRef(null);
@@ -134,14 +133,18 @@ export default function App() {
   };
 
   return (
-    <div className="app-container">
-      <h1>Screen Share Stream</h1>
+    <div className="w-full min-h-screen flex flex-col items-center px-4 py-8 max-w-[1400px] mx-auto">
+      <h1 className="text-[clamp(2rem,5vw,3rem)] font-bold mb-12 text-center tracking-tight bg-gradient-to-br from-white to-white/70 bg-clip-text text-transparent">
+        Screen Share Stream
+      </h1>
       
       {!isConnected ? (
-        <div className="connection-form">
-          <form onSubmit={handleConnect}>
-            <div className="form-group">
-              <label htmlFor="domain">Tunnel Domain:</label>
+        <div className="w-full max-w-[480px] mx-auto p-10 bg-[#1f1f1f] border border-white/10 rounded-2xl shadow-2xl backdrop-blur-sm">
+          <form onSubmit={handleConnect} className="space-y-7">
+            <div className="space-y-3">
+              <label htmlFor="domain" className="block text-white font-semibold text-[0.95rem] tracking-wide">
+                Tunnel Domain:
+              </label>
               <input
                 id="domain"
                 type="text"
@@ -149,11 +152,16 @@ export default function App() {
                 value={domain}
                 onChange={(e) => setDomain(e.target.value.trim())}
                 required
+                className="w-full px-4 py-3.5 border border-white/10 rounded-[10px] bg-[#1a1a1a] text-white text-base font-inherit transition-all duration-200 placeholder:text-white/50 focus:outline-none focus:border-indigo-500 focus:bg-[#141414] focus:ring-2 focus:ring-indigo-500/10"
               />
-              <small>Enter the domain name from the server (e.g., "true-mugs-swim")</small>
+              <small className="block mt-2 text-white/70 text-[0.8125rem] leading-snug">
+                Enter the domain name from the server (e.g., "true-mugs-swim")
+              </small>
             </div>
-            <div className="form-group">
-              <label htmlFor="code">Access Code:</label>
+            <div className="space-y-3">
+              <label htmlFor="code" className="block text-white font-semibold text-[0.95rem] tracking-wide">
+                Access Code:
+              </label>
               <input
                 id="code"
                 type="text"
@@ -162,40 +170,57 @@ export default function App() {
                 onChange={(e) => setCode(e.target.value.trim().toUpperCase())}
                 maxLength={6}
                 required
+                className="w-full px-4 py-3.5 border border-white/10 rounded-[10px] bg-[#1a1a1a] text-white text-base font-inherit transition-all duration-200 placeholder:text-white/50 focus:outline-none focus:border-indigo-500 focus:bg-[#141414] focus:ring-2 focus:ring-indigo-500/10"
               />
-              <small>Enter the 6-character code from the server</small>
+              <small className="block mt-2 text-white/70 text-[0.8125rem] leading-snug">
+                Enter the 6-character code from the server
+              </small>
             </div>
-            <button type="submit" className="connect-button">
+            <button 
+              type="submit" 
+              className="w-full py-3.5 px-6 bg-gradient-to-br from-indigo-500 to-indigo-600 text-white rounded-[10px] text-base font-semibold cursor-pointer transition-all duration-200 shadow-[0_4px_12px_rgba(99,102,241,0.3)] mt-2 hover:-translate-y-0.5 hover:shadow-[0_6px_16px_rgba(99,102,241,0.4)] active:translate-y-0"
+            >
               Connect to Stream
             </button>
           </form>
-          {error && <div className="error">{error}</div>}
+          {error && (
+            <div className="mt-4 text-red-400 text-base p-6 bg-red-500/10 border border-red-500/30 rounded-xl text-center leading-relaxed">
+              {error}
+            </div>
+          )}
         </div>
       ) : (
         <>
-          <div className="connection-info">
-            <span>Connected to: {domain}.loca.lt</span>
-            <button onClick={handleDisconnect} className="disconnect-button">
+          <div className="w-full max-w-[1280px] flex justify-between items-center mb-6 p-4 px-6 bg-[#1f1f1f] border border-white/10 rounded-xl shadow-lg md:flex-row flex-col gap-4 md:gap-0">
+            <span className="text-white font-medium text-[0.95rem] md:text-left text-center before:content-['●'] before:text-emerald-500 before:mr-2 before:text-xs">
+              Connected to: {domain}.loca.lt
+            </span>
+            <button 
+              onClick={handleDisconnect} 
+              className="px-5 py-2 bg-red-500 text-white rounded-lg text-sm font-medium cursor-pointer transition-all duration-200 hover:bg-red-600 hover:-translate-y-0.5 hover:shadow-[0_4px_12px_rgba(239,68,68,0.3)] md:w-auto w-full"
+            >
               Disconnect
             </button>
           </div>
-          <div className="video-container">
+          <div className="relative w-full max-w-[1280px] flex justify-center items-center min-h-[400px] bg-[#141414] border border-white/10 rounded-2xl p-6 shadow-2xl overflow-hidden md:min-h-[400px] min-h-[300px]">
             {isLoading && !error && (
-              <div className="loading">Loading stream...</div>
+              <div className="text-white/70 text-lg p-12 flex items-center gap-3">
+                <div className="w-5 h-5 border-[3px] border-white/10 border-t-indigo-500 rounded-full animate-spin"></div>
+                Loading stream...
+              </div>
             )}
-            {error && <div className="error">{error}</div>}
+            {error && (
+              <div className="text-red-400 text-base p-6 bg-red-500/10 border border-red-500/30 rounded-xl text-center leading-relaxed">
+                {error}
+              </div>
+            )}
             <video
               ref={videoRef}
               controls
               autoPlay
               muted
               playsInline
-              style={{
-                width: "100%",
-                maxWidth: "1280px",
-                borderRadius: "10px",
-                display: error ? "none" : "block",
-              }}
+              className={`w-full h-auto max-w-full bg-black rounded-xl shadow-2xl ${error ? 'hidden' : 'block'}`}
             />
           </div>
         </>
