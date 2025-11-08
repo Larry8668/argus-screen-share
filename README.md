@@ -14,6 +14,15 @@ This application uses **HLS (HTTP Live Streaming)** to break your screen capture
 
 This approach provides low-latency streaming (~2-4 seconds delay) and works reliably across all modern browsers.
 
+### Authentication & Security
+
+The server generates a **random 6-character access code** on startup that must be provided to access the stream:
+
+- **Access code** is sent via HTTP header (`x-access-code`) and query parameter (`?code=`)
+- **All stream requests** (playlist and segments) are validated against this code
+- **Code is regenerated** each time the server restarts for security
+- **Tunnel domain** is extracted from the localtunnel URL and displayed for easy connection
+
 ### Cross-Platform Support
 
 The application can run on **Windows, macOS, and Linux** by using platform-specific FFmpeg input formats:
@@ -100,11 +109,24 @@ node server.js
 
 The server will:
 - Start an Express server on `http://localhost:3000`
+- **Automatically create a localtunnel** (public URL will be displayed in console)
+- **Generate a random 6-character access code** for authentication
 - Launch FFmpeg to capture your screen
 - Generate HLS segments in `server/public/`
 - Stream the video via HLS
 
 **Note:** On first run, macOS will prompt for screen recording permissions. Grant access in System Settings > Privacy & Security > Screen Recording.
+
+**Connection Info:** When the server starts, you'll see output like this:
+```
+🌐 Tunnel created: https://true-mugs-swim.loca.lt
+🔑 Access Code: ABC123
+📋 Connection Info:
+   Domain: true-mugs-swim
+   Code: ABC123
+```
+
+**Save these values** - you'll need them to connect from the client. The access code is randomly generated each time the server starts.
 
 ### Start the client
 
@@ -114,7 +136,25 @@ From the `client` directory (in a new terminal):
 npm run dev
 ```
 
-The React app will open in your browser (typically `http://localhost:5173`) and automatically connect to the stream.
+The React app will open in your browser (typically `http://localhost:5173`).
+
+### Connect to the stream
+
+1. **Enter the connection information:**
+   - **Tunnel Domain**: Enter the domain name from the server console (e.g., `true-mugs-swim`)
+   - **Access Code**: Enter the 6-character code from the server console (e.g., `ABC123`)
+
+2. **Click "Connect to Stream"** - The client will:
+   - Construct the tunnel URL: `https://{domain}.loca.lt`
+   - Add authentication headers and query parameters
+   - Automatically bypass the localtunnel landing page
+   - Start streaming your screen
+
+3. **The stream will appear** in the video player once connected.
+
+**Security:** The access code is required for all stream requests. Only users with the correct code can access the stream.
+
+**Note:** The client automatically adds the `bypass-tunnel-reminder` header to skip the localtunnel landing page when using HLS.js (Chrome/Firefox). Safari users may need to visit the tunnel URL once manually.
 
 ## Project Structure
 
@@ -174,12 +214,9 @@ List devices: `ffmpeg -f avfoundation -list_devices true -i ""`
 
 Change `PORT` in `server/server.js` (default: `3000`)
 
-### Client Stream URL
+### Access Code Generation
 
-Update the stream URL in `client/src/App.jsx` if you change the server port:
-```javascript
-hls.loadSource("http://localhost:3000/stream.m3u8");
-```
+The server automatically generates a random 6-character alphanumeric code on startup. To customize the code generation, modify the `generateAccessCode()` function in `server/server.js`.
 
 ## Troubleshooting
 
@@ -187,6 +224,9 @@ hls.loadSource("http://localhost:3000/stream.m3u8");
 - **No stream found**: Wait a few seconds after starting the server for segments to generate
 - **Permission denied**: Grant screen recording permissions in macOS System Settings
 - **FFmpeg not found**: Ensure FFmpeg is installed and in your PATH
+- **Invalid access code**: Make sure you're using the exact code displayed in the server console (case-sensitive)
+- **Connection failed**: Verify the tunnel domain matches exactly what's shown in the server console (e.g., `true-mugs-swim` not `true-mugs-swim.loca.lt`)
+- **Tunnel not created**: If localtunnel fails, the server will still run on localhost. Check your internet connection and try restarting the server
 
 ## License
 
