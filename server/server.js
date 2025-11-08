@@ -91,12 +91,8 @@ app.listen(PORT, async () => {
       logger.logError('Tunnel closed');
     });
     
-    // Handle graceful shutdown
-    process.on('SIGINT', () => {
-      logger.logInfo('\n\nShutting down...');
-      tunnel.close();
-      process.exit();
-    });
+    // Store tunnel reference for cleanup
+    global.tunnel = tunnel;
   } catch (error) {
     logger.logError(`Failed to create tunnel: ${error.message}`);
     logger.logInfo('Server still running on localhost - tunnel creation failed');
@@ -137,3 +133,59 @@ const ffmpeg = spawn("ffmpeg", ffmpegArgs);
 ffmpeg.stdout.on("data", data => logger.logFFmpeg(data, false));
 ffmpeg.stderr.on("data", data => logger.logFFmpeg(data, true));
 ffmpeg.on("close", code => logger.logFFmpegExit(code));
+
+// Graceful shutdown handler
+let isShuttingDown = false;
+
+function shutdown() {
+  // Prevent multiple shutdown calls
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+  
+  logger.logInfo('\n\nShutting down...');
+  
+  // Close tunnel if it exists
+  if (global.tunnel) {
+    global.tunnel.close();
+  }
+  
+  // Clean up logger/TUI first (restore terminal)
+  logger.cleanup();
+  
+  // Kill FFmpeg process
+  if (ffmpeg && !ffmpeg.killed) {
+    logger.logInfo('Stopping FFmpeg...');
+    ffmpeg.kill('SIGTERM');
+    
+    // Wait for FFmpeg to exit, then force kill if needed
+    const killTimeout = setTimeout(() => {
+      if (ffmpeg && !ffmpeg.killed) {
+        logger.logInfo('Force killing FFmpeg...');
+        ffmpeg.kill('SIGKILL');
+        process.exit(0);
+      }
+    }, 2000);
+    
+    // Add exit handler when FFmpeg closes
+    const exitOnClose = () => {
+      clearTimeout(killTimeout);
+      process.exit(0);
+    };
+    
+    // Check if already closed
+    if (ffmpeg.killed) {
+      clearTimeout(killTimeout);
+      process.exit(0);
+    } else {
+      // Wait for close event
+      ffmpeg.once('close', exitOnClose);
+    }
+  } else {
+    // FFmpeg already closed or doesn't exist
+    process.exit(0);
+  }
+}
+
+// Handle shutdown signals
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);

@@ -90,9 +90,10 @@ function displayConnectionInfo() {
   screen.append(connectionBox);
   screen.append(logBox);
   
-  // Handle quit
+  // Handle quit - emit SIGINT to trigger proper cleanup
   screen.key(['q', 'C-c'], () => {
-    return process.exit(0);
+    process.emit('SIGINT');
+    return false;
   });
   
   // Focus on log box for scrolling
@@ -223,6 +224,13 @@ function logFFmpegExit(code) {
   }
 }
 
+// Cleanup function to restore terminal
+function cleanup() {
+  if (screen) {
+    screen.destroy();
+  }
+}
+
 module.exports = {
   initLogger,
   displayConnectionInfo,
@@ -230,6 +238,7 @@ module.exports = {
   logSuccess,
   logError,
   logInfo,
-  logFFmpegExit
+  logFFmpegExit,
+  cleanup
 };
 
