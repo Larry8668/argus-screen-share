@@ -12,6 +12,8 @@ export function View() {
   const [status, setStatus] = useState("Enter a room code");
   const [pairInfo, setPairInfo] = useState<string | null>(null);
   const [hasVideo, setHasVideo] = useState(false);
+  const [hasAudio, setHasAudio] = useState(false);
+  const [muted, setMuted] = useState(true); // autoplay policy: must start muted
   const [lines, log] = useLog();
 
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -90,8 +92,9 @@ export function View() {
     pc.ontrack = (event) => {
       const [stream] = event.streams;
       if (videoRef.current && stream) {
-        videoRef.current.srcObject = stream;
-        setHasVideo(true);
+        if (videoRef.current.srcObject !== stream) videoRef.current.srcObject = stream;
+        if (event.track.kind === "video") setHasVideo(true);
+        if (event.track.kind === "audio") setHasAudio(true);
         log(`receiving ${event.track.kind} track`);
       }
     };
@@ -136,6 +139,7 @@ export function View() {
     window.clearInterval(statsTimer.current);
     setPairInfo(null);
     setHasVideo(false);
+    setHasAudio(false);
     pendingIce.current = [];
     pcRef.current?.close();
     pcRef.current = null;
@@ -148,6 +152,14 @@ export function View() {
     sigRef.current?.close();
     sigRef.current = null;
     setJoinedCode(null);
+  }
+
+  function toggleMute() {
+    const video = videoRef.current;
+    if (!video) return;
+    video.muted = !video.muted;
+    setMuted(video.muted);
+    log(video.muted ? "muted" : "unmuted");
   }
 
   function fullscreen() {
@@ -192,6 +204,9 @@ export function View() {
             </div>
             <div className="grow">{pairInfo && <div className="muted small-text">path: {pairInfo}</div>}</div>
             <div className="col">
+              <button className="button small" onClick={toggleMute} disabled={!hasAudio} title={hasAudio ? "" : "Sharer isn't sending audio"}>
+                {muted ? "Unmute" : "Mute"}
+              </button>
               <button className="button small" onClick={fullscreen} disabled={!hasVideo}>Fullscreen</button>
               <button className="button small danger" onClick={() => { leave(); setStatus("Enter a room code"); }}>Leave</button>
             </div>
@@ -200,6 +215,7 @@ export function View() {
       )}
 
       <video ref={videoRef} className={`video ${hasVideo ? "" : "hidden"}`} autoPlay muted playsInline />
+      {hasAudio && muted && <p className="muted small-text">Audio is available. Click Unmute to hear it.</p>}
 
       <LogPanel lines={lines} />
     </main>

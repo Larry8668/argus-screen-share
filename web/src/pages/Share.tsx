@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { generateCode } from "../lib/code";
+import { canCapture, captureStream, unavailableReason, type Source } from "../lib/capture";
 import { createPeer, describeSelectedPair } from "../lib/peer";
 import { Signaling, type SignalMessage } from "../lib/signaling";
 import { useLog } from "../lib/useLog";
@@ -24,26 +25,34 @@ export function Share() {
 
   useEffect(() => () => stop(), []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function start() {
+  async function start(source: Source) {
+    if (!canCapture(source)) {
+      log(`${source} capture unavailable: ${unavailableReason(source)}`);
+      return;
+    }
     let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getDisplayMedia({
-        video: { frameRate: { ideal: 30 } },
-        audio: false,
-      });
+      stream = await captureStream(source);
     } catch (err) {
-      log(`capture cancelled or denied: ${(err as Error).message}`);
+      log(`${source} capture cancelled or denied: ${(err as Error).name}: ${(err as Error).message}`);
       return;
     }
 
     const [track] = stream.getVideoTracks();
-    track.contentHint = "detail"; // prefer sharpness over frame rate: it's mostly text
+    // Screen = mostly text, prefer sharpness. Camera = motion, prefer smoothness.
+    track.contentHint = source === "screen" ? "detail" : "motion";
     track.onended = () => {
       log("capture ended by the browser (stop sharing clicked)");
       stop();
     };
     const settings = track.getSettings();
-    log(`capturing ${settings.width}×${settings.height} @ ${settings.frameRate ?? "?"}fps`);
+    log(`capturing ${source} ${settings.width}×${settings.height} @ ${settings.frameRate ?? "?"}fps`);
+    const audioTracks = stream.getAudioTracks();
+    if (audioTracks.length) {
+      log(`audio: yes (${audioTracks[0].label || "system/tab audio"})`);
+    } else if (source === "screen") {
+      log("audio: none — the browser didn't offer it or the share-audio box was unchecked");
+    }
 
     streamRef.current = stream;
     if (previewRef.current) previewRef.current.srcObject = stream;
@@ -173,8 +182,24 @@ export function Share() {
 
       {phase === "idle" ? (
         <section className="card center">
-          <p className="muted">Pick a screen or window. Nothing leaves this device until a viewer connects.</p>
-          <button className="button" onClick={start}>Start sharing</button>
+          {canCapture("screen") ? (
+            <p className="muted">Pick a screen or window. Nothing leaves this device until a viewer connects.</p>
+          ) : (
+            <p className="muted">{unavailableReason("screen")}</p>
+          )}
+          <div className="row">
+            {canCapture("screen") && (
+              <button className="button" onClick={() => start("screen")}>Share screen</button>
+            )}
+            {canCapture("camera") && (
+              <button className={`button ${canCapture("screen") ? "secondary" : ""}`} onClick={() => start("camera")}>
+                Share camera
+              </button>
+            )}
+          </div>
+          {!canCapture("screen") && !canCapture("camera") && (
+            <p className="muted">{unavailableReason("camera")}</p>
+          )}
         </section>
       ) : (
         <section className="card">
