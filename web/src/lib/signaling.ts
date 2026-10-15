@@ -7,10 +7,14 @@ export type SignalMessage =
   | { type: "hello"; role: Role; peerPresent: boolean }
   | { type: "peer-joined"; role: Role }
   | { type: "peer-left"; role: Role }
-  | { type: "offer"; sdp: string }
-  | { type: "answer"; sdp: string }
-  | { type: "ice"; candidate: RTCIceCandidateInit }
+  // id ties an answer and ICE candidates to the offer (and peer connection) they belong
+  // to, so replies to a superseded offer can be recognised and dropped.
+  | { type: "offer"; id: string; sdp: string }
+  | { type: "answer"; id: string; sdp: string }
+  | { type: "ice"; id: string; candidate: RTCIceCandidateInit }
   | { type: "bye" }
+  // Sent to the relay only (never forwarded) so call health shows up in Worker logs.
+  | { type: "stats"; text: string }
   | { type: "error"; message: string };
 
 export type SignalStatus = "connecting" | "open" | "closed";

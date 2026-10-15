@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { isValidCode, normalizeCode } from "../lib/code";
-import { createPeer, describeSelectedPair } from "../lib/peer";
-import { Signaling, type SignalMessage } from "../lib/signaling";
+import { Receiver, stateText } from "../lib/session";
 import { useLog } from "../lib/useLog";
 import { LogPanel } from "../components/LogPanel";
 
@@ -11,16 +10,19 @@ export function View() {
   const [joinedCode, setJoinedCode] = useState<string | null>(null);
   const [status, setStatus] = useState("Enter a room code");
   const [pairInfo, setPairInfo] = useState<string | null>(null);
+  const [videoInfo, setVideoInfo] = useState<string | null>(null);
+  const [audioInfo, setAudioInfo] = useState<string | null>(null);
   const [hasVideo, setHasVideo] = useState(false);
   const [hasAudio, setHasAudio] = useState(false);
   const [muted, setMuted] = useState(true); // autoplay policy: must start muted
   const [lines, log] = useLog();
 
   const videoRef = useRef<HTMLVideoElement>(null);
-  const sigRef = useRef<Signaling | null>(null);
-  const pcRef = useRef<RTCPeerConnection | null>(null);
-  const pendingIce = useRef<RTCIceCandidateInit[]>([]);
-  const statsTimer = useRef<number | undefined>(undefined);
+  // Sound plays through its own element, started from the Unmute press. TV and Android
+  // browsers can ignore un-muting a <video> that autoplayed muted, so the video element
+  // stays muted for good and only carries pictures.
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const receiverRef = useRef<Receiver | null>(null);
 
   useEffect(() => {
     if (isValidCode(initialCode)) join(initialCode);
@@ -35,131 +37,62 @@ export function View() {
     leave();
     history.replaceState(null, "", `/view?code=${code}`);
 
-    const sig = new Signaling(code, "view");
-    sig.onStatus = (s, detail) => log(`signaling socket: ${s}${detail ? ` (${detail})` : ""}`);
-    sig.onMessage = handleSignal;
-    sig.connect();
-    sigRef.current = sig;
-
-    setJoinedCode(code);
-    setStatus("Waiting for the sharer");
-  }
-
-  async function handleSignal(message: SignalMessage) {
-    switch (message.type) {
-      case "hello":
-        log(`joined room${message.peerPresent ? ", sharer is here, waiting for offer" : ", no sharer yet"}`);
-        break;
-      case "peer-joined":
-        log("sharer joined, waiting for offer");
-        break;
-      case "offer":
-        await acceptOffer(message.sdp);
-        break;
-      case "ice": {
-        const pc = pcRef.current;
-        if (pc?.remoteDescription) {
-          try {
-            await pc.addIceCandidate(message.candidate);
-          } catch (err) {
-            log(`bad ice candidate: ${(err as Error).message}`);
-          }
-        } else {
-          pendingIce.current.push(message.candidate);
+    const receiver = new Receiver(code, {
+      log,
+      onState: (state) => setStatus(stateText(state, "the sharer")),
+      onPath: setPairInfo,
+      onVideo: setVideoInfo,
+      onAudio: setAudioInfo,
+      onTrack: (track, stream) => {
+        const video = videoRef.current;
+        if (!video) return;
+        if (video.srcObject !== stream) video.srcObject = stream;
+        if (track.kind === "video") setHasVideo(true);
+        if (track.kind === "audio") {
+          if (audioRef.current) audioRef.current.srcObject = new MediaStream([track]);
+          // A muted *track* means no audio packets are arriving, unlike a muted element.
+          log(`audio track: ${track.muted ? "waiting for packets" : "live"}`);
+          track.onmute = () => log("audio track: packets stopped");
+          track.onunmute = () => log("audio track: packets flowing");
+          setHasAudio(true);
         }
-        break;
-      }
-      case "peer-left":
-      case "bye":
-        log("sharer left");
-        closePeer();
-        setStatus("Sharer left. Waiting for them to come back");
-        break;
-      case "error":
-        log(`relay error: ${message.message}`);
-        break;
-    }
-  }
-
-  async function acceptOffer(sdp: string) {
-    const sig = sigRef.current;
-    if (!sig) return;
-
-    closePeer();
-    const pc = createPeer(log);
-    pcRef.current = pc;
-
-    pc.ontrack = (event) => {
-      const [stream] = event.streams;
-      if (videoRef.current && stream) {
-        if (videoRef.current.srcObject !== stream) videoRef.current.srcObject = stream;
-        if (event.track.kind === "video") setHasVideo(true);
-        if (event.track.kind === "audio") setHasAudio(true);
-        log(`receiving ${event.track.kind} track`);
-      }
-    };
-    pc.onicecandidate = (event) => {
-      if (event.candidate) sig.send({ type: "ice", candidate: event.candidate.toJSON() });
-    };
-    pc.onconnectionstatechange = () => {
-      log(`connection: ${pc.connectionState}`);
-      if (pc.connectionState === "connected") {
-        setStatus("Connected");
-        startStatsPolling(pc);
-      } else if (pc.connectionState === "failed") {
-        setStatus("Connection failed (no path between the two networks?)");
-      }
-    };
-
-    await pc.setRemoteDescription({ type: "offer", sdp });
-    for (const candidate of pendingIce.current.splice(0)) {
-      try {
-        await pc.addIceCandidate(candidate);
-      } catch (err) {
-        log(`bad queued ice candidate: ${(err as Error).message}`);
-      }
-    }
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-    sig.send({ type: "answer", sdp: answer.sdp! });
-    setStatus("Connecting…");
-    log("answer sent");
-  }
-
-  function startStatsPolling(pc: RTCPeerConnection) {
-    window.clearInterval(statsTimer.current);
-    statsTimer.current = window.setInterval(async () => {
-      if (pc.connectionState !== "connected") return;
-      const info = await describeSelectedPair(pc);
-      if (info) setPairInfo(info);
-    }, 2000);
-  }
-
-  function closePeer() {
-    window.clearInterval(statsTimer.current);
-    setPairInfo(null);
-    setHasVideo(false);
-    setHasAudio(false);
-    pendingIce.current = [];
-    pcRef.current?.close();
-    pcRef.current = null;
-    if (videoRef.current) videoRef.current.srcObject = null;
+      },
+      onPeerGone: () => {
+        setHasVideo(false);
+        setHasAudio(false);
+        if (videoRef.current) videoRef.current.srcObject = null;
+        if (audioRef.current) audioRef.current.srcObject = null;
+      },
+    });
+    receiver.start();
+    receiverRef.current = receiver;
+    setJoinedCode(code);
   }
 
   function leave() {
-    sigRef.current?.send({ type: "bye" });
-    closePeer();
-    sigRef.current?.close();
-    sigRef.current = null;
+    receiverRef.current?.stop();
+    receiverRef.current = null;
     setJoinedCode(null);
   }
 
-  function toggleMute() {
-    const video = videoRef.current;
-    if (!video) return;
-    video.muted = !video.muted;
-    setMuted(video.muted);
-    log(video.muted ? "muted" : "unmuted");
+  async function toggleMute() {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (!muted) {
+      audio.pause();
+      setMuted(true);
+      log("muted");
+      return;
+    }
+    audio.muted = false;
+    try {
+      // Called straight from the button press, which is what autoplay policies require.
+      await audio.play();
+      setMuted(false);
+      log("unmuted, audio playing");
+    } catch (err) {
+      log(`audio play refused: ${(err as Error).name}: ${(err as Error).message}`);
+    }
   }
 
   function fullscreen() {
@@ -202,10 +135,14 @@ export function View() {
               <div className="label">Room</div>
               <div className="code">{joinedCode}</div>
             </div>
-            <div className="grow">{pairInfo && <div className="muted small-text">path: {pairInfo}</div>}</div>
+            <div className="grow">
+              {pairInfo && <div className="muted small-text">path: {pairInfo}</div>}
+              {videoInfo && <div className="muted small-text">video: {videoInfo}</div>}
+              {audioInfo && <div className="muted small-text">audio: {audioInfo}</div>}
+            </div>
             <div className="col">
-              <button className="button small" onClick={toggleMute} disabled={!hasAudio} title={hasAudio ? "" : "Sharer isn't sending audio"}>
-                {muted ? "Unmute" : "Mute"}
+              <button className="button small" onClick={() => void toggleMute()} disabled={!hasAudio}>
+                {!hasAudio ? "No audio" : muted ? "Unmute" : "Mute"}
               </button>
               <button className="button small" onClick={fullscreen} disabled={!hasVideo}>Fullscreen</button>
               <button className="button small danger" onClick={() => { leave(); setStatus("Enter a room code"); }}>Leave</button>
@@ -215,7 +152,14 @@ export function View() {
       )}
 
       <video ref={videoRef} className={`video ${hasVideo ? "" : "hidden"}`} autoPlay muted playsInline />
+      <audio ref={audioRef} />
       {hasAudio && muted && <p className="muted small-text">Audio is available. Click Unmute to hear it.</p>}
+      {hasVideo && !hasAudio && (
+        <p className="muted small-text">
+          The sharer isn't sending sound. To include it, share a browser tab (any OS) or the entire screen on Windows,
+          and tick "Share audio" in the picker.
+        </p>
+      )}
 
       <LogPanel lines={lines} />
     </main>

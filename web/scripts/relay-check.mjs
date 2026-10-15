@@ -13,8 +13,9 @@ function open(role) {
     ws.onmessage = (e) => { const m = e.data; const w = waiters.shift(); w ? w(m) : inbox.push(m); };
     ws.next = (ms = 4000) => new Promise((res, rej) => {
       if (inbox.length) return res(inbox.shift());
-      const t = setTimeout(() => rej(new Error(`timeout waiting on ${role}`)), ms);
-      waiters.push((m) => { clearTimeout(t); res(m); });
+      const waiter = (m) => { clearTimeout(t); res(m); };
+      const t = setTimeout(() => { waiters.splice(waiters.indexOf(waiter), 1); rej(new Error(`timeout waiting on ${role}`)); }, ms);
+      waiters.push(waiter);
     });
     ws.onopen = () => resolve(ws);
     ws.onerror = () => reject(new Error(`${role} socket error`));
@@ -67,10 +68,12 @@ m = j(await view2.next());
 check("view2 hello", m.type === "hello" && m.peerPresent === true);
 const closed = await new Promise((res) => { view.onclose = (e) => res(e); setTimeout(() => res(null), 4000); });
 check("old view closed with 4000", closed?.code === 4000, closed ? `${closed.code} ${closed.reason}` : "no close");
-// share sees: peer-left (old view closed) then peer-joined (view2) — order can vary
-const a = j(await share.next()), b = j(await share.next());
-const types = [a.type, b.type].sort().join(",");
-check("share sees peer-left + peer-joined", types === "peer-joined,peer-left", types);
+// share sees only peer-joined: a replaced socket's close must not be announced as peer-left,
+// or it could arrive after view2's handshake and tear the new call down.
+m = j(await share.next());
+check("share gets peer-joined for view2", m.type === "peer-joined" && m.role === "view", JSON.stringify(m));
+const extra = await share.next(1500).then(j, () => null);
+check("replaced view not announced as peer-left", extra === null, extra ? JSON.stringify(extra) : "");
 
 // 7. view2 leaves → share notified
 view2.close(1000, "bye");

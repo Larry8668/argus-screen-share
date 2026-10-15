@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { generateCode } from "../lib/code";
-import { canCapture, captureStream, unavailableReason, type Source } from "../lib/capture";
-import { createPeer, describeSelectedPair } from "../lib/peer";
-import { Signaling, type SignalMessage } from "../lib/signaling";
+import { canCapture, captureStream, tuneTrack, unavailableReason, type Source, type Tuning } from "../lib/capture";
+import { Sender, stateText } from "../lib/session";
 import { useLog } from "../lib/useLog";
+import { LevelMeter } from "../components/LevelMeter";
 import { LogPanel } from "../components/LogPanel";
 
 type Phase = "idle" | "sharing";
@@ -13,13 +13,15 @@ export function Share() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [status, setStatus] = useState("Not sharing");
   const [pairInfo, setPairInfo] = useState<string | null>(null);
+  const [videoInfo, setVideoInfo] = useState<string | null>(null);
+  const [audioInfo, setAudioInfo] = useState<string | null>(null);
+  const [tuning, setTuning] = useState<Tuning>("text");
+  const [captured, setCaptured] = useState<MediaStream | null>(null);
   const [lines, log] = useLog();
 
   const previewRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const sigRef = useRef<Signaling | null>(null);
-  const pcRef = useRef<RTCPeerConnection | null>(null);
-  const statsTimer = useRef<number | undefined>(undefined);
+  const senderRef = useRef<Sender | null>(null);
 
   const viewerUrl = `${location.origin}/view?code=${code}`;
 
@@ -39,8 +41,11 @@ export function Share() {
     }
 
     const [track] = stream.getVideoTracks();
-    // Screen = mostly text, prefer sharpness. Camera = motion, prefer smoothness.
-    track.contentHint = source === "screen" ? "detail" : "motion";
+    // Screen starts tuned for text; camera is always motion.
+    const initial: Tuning = source === "screen" ? "text" : "motion";
+    const degradation = source === "screen" ? await tuneTrack(track, initial) : "maintain-framerate";
+    if (source === "camera") track.contentHint = "motion";
+    setTuning(initial);
     track.onended = () => {
       log("capture ended by the browser (stop sharing clicked)");
       stop();
@@ -49,117 +54,53 @@ export function Share() {
     log(`capturing ${source} ${settings.width}×${settings.height} @ ${settings.frameRate ?? "?"}fps`);
     const audioTracks = stream.getAudioTracks();
     if (audioTracks.length) {
-      log(`audio: yes (${audioTracks[0].label || "system/tab audio"})`);
+      const audio = audioTracks[0];
+      log(`audio: yes (${audio.label || "system/tab audio"})${audio.muted ? ", but no sound frames yet" : ""}`);
+      audio.onmute = () => log("audio capture: no sound frames (on macOS: check System Settings → Privacy → Screen & System Audio Recording)");
+      audio.onunmute = () => log("audio capture: sound frames flowing");
     } else if (source === "screen") {
       log("audio: none — the browser didn't offer it or the share-audio box was unchecked");
     }
 
     streamRef.current = stream;
+    setCaptured(stream);
     if (previewRef.current) previewRef.current.srcObject = stream;
 
-    const sig = new Signaling(code, "share");
-    sig.onStatus = (s, detail) => log(`signaling socket: ${s}${detail ? ` (${detail})` : ""}`);
-    sig.onMessage = handleSignal;
-    sig.connect();
-    sigRef.current = sig;
+    const sender = new Sender(code, stream, {
+      log,
+      onState: (state) => setStatus(stateText(state, "a viewer")),
+      onPath: setPairInfo,
+      onVideo: setVideoInfo,
+      onAudio: setAudioInfo,
+    });
+    await sender.setDegradation(degradation);
+    sender.start();
+    senderRef.current = sender;
 
     setPhase("sharing");
-    setStatus("Waiting for a viewer");
   }
 
-  async function handleSignal(message: SignalMessage) {
-    switch (message.type) {
-      case "hello":
-        log(`joined room ${code}${message.peerPresent ? ", viewer already waiting" : ""}`);
-        if (message.peerPresent) await makeOffer();
-        break;
-      case "peer-joined":
-        log("viewer joined");
-        await makeOffer();
-        break;
-      case "answer": {
-        const pc = pcRef.current;
-        if (!pc) return log("answer arrived with no peer connection, ignoring");
-        await pc.setRemoteDescription({ type: "answer", sdp: message.sdp });
-        log("answer applied");
-        break;
-      }
-      case "ice": {
-        const pc = pcRef.current;
-        if (!pc) return;
-        try {
-          await pc.addIceCandidate(message.candidate);
-        } catch (err) {
-          log(`bad ice candidate: ${(err as Error).message}`);
-        }
-        break;
-      }
-      case "peer-left":
-      case "bye":
-        log("viewer left");
-        closePeer();
-        setStatus("Waiting for a viewer");
-        break;
-      case "error":
-        log(`relay error: ${message.message}`);
-        break;
+  async function changeTuning(next: Tuning) {
+    const track = streamRef.current?.getVideoTracks()[0];
+    if (!track) return;
+    try {
+      const degradation = await tuneTrack(track, next);
+      await senderRef.current?.setDegradation(degradation);
+      setTuning(next);
+      const { width, height } = track.getSettings();
+      log(`tuned for ${next}: ${width}×${height}, ${degradation}`);
+    } catch (err) {
+      log(`couldn't retune: ${(err as Error).message}`);
     }
   }
 
-  async function makeOffer() {
-    const stream = streamRef.current;
-    const sig = sigRef.current;
-    if (!stream || !sig) return;
-
-    closePeer();
-    const pc = createPeer(log);
-    pcRef.current = pc;
-    for (const track of stream.getTracks()) pc.addTrack(track, stream);
-
-    pc.onicecandidate = (event) => {
-      if (event.candidate) sig.send({ type: "ice", candidate: event.candidate.toJSON() });
-    };
-    pc.onconnectionstatechange = () => {
-      log(`connection: ${pc.connectionState}`);
-      if (pc.connectionState === "connected") {
-        setStatus("Connected");
-        startStatsPolling(pc);
-      } else if (pc.connectionState === "failed") {
-        setStatus("Connection failed (no path between the two networks?)");
-      }
-    };
-
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    sig.send({ type: "offer", sdp: offer.sdp! });
-    setStatus("Connecting…");
-    log("offer sent");
-  }
-
-  function startStatsPolling(pc: RTCPeerConnection) {
-    window.clearInterval(statsTimer.current);
-    statsTimer.current = window.setInterval(async () => {
-      if (pc.connectionState !== "connected") return;
-      const info = await describeSelectedPair(pc);
-      if (info) setPairInfo(info);
-    }, 2000);
-  }
-
-  function closePeer() {
-    window.clearInterval(statsTimer.current);
-    setPairInfo(null);
-    pcRef.current?.close();
-    pcRef.current = null;
-  }
-
   function stop() {
-    sigRef.current?.send({ type: "bye" });
-    closePeer();
+    senderRef.current?.stop();
+    senderRef.current = null;
+    setCaptured(null);
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     if (previewRef.current) previewRef.current.srcObject = null;
-    sigRef.current?.close();
-    sigRef.current = null;
     setPhase("idle");
     setStatus("Not sharing");
   }
@@ -217,7 +158,22 @@ export function Share() {
               <button className="button small danger" onClick={stop}>Stop</button>
             </div>
           </div>
+          <div className="row start tune">
+            <span className="label">Optimize for</span>
+            <div className="tabs">
+              <button className={tuning === "text" ? "active" : ""} onClick={() => void changeTuning("text")}>Text</button>
+              <button className={tuning === "motion" ? "active" : ""} onClick={() => void changeTuning("motion")}>Video</button>
+            </div>
+          </div>
+          {captured?.getAudioTracks().length ? (
+            <div className="stack tight">
+              <span className="label">Sound being captured</span>
+              <LevelMeter stream={captured} />
+            </div>
+          ) : null}
           {pairInfo && <div className="muted small-text">path: {pairInfo}</div>}
+          {videoInfo && <div className="muted small-text">video: {videoInfo}</div>}
+          {audioInfo && <div className="muted small-text">audio: {audioInfo}</div>}
         </section>
       )}
 
