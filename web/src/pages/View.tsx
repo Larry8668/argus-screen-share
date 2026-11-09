@@ -1,15 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import { isValidCode, normalizeCode } from "../lib/code";
 import { createBooster, type Booster } from "../lib/audio";
-import { Receiver, stateText } from "../lib/session";
+import { Receiver, stateText, type PeerState } from "../lib/session";
 import { useLog } from "../lib/useLog";
-import { LogPanel } from "../components/LogPanel";
+import { Shell } from "../components/Shell";
+import { toneOf } from "../lib/tone";
+import { CodeEntry } from "../components/CodeEntry";
+import { Player } from "../components/Player";
+import { Details } from "../components/Details";
+import { Icon } from "../components/Icon";
 
 export function View() {
   const initialCode = normalizeCode(new URLSearchParams(location.search).get("code") ?? "");
-  const [codeInput, setCodeInput] = useState(initialCode);
   const [joinedCode, setJoinedCode] = useState<string | null>(null);
-  const [status, setStatus] = useState("Enter a room code");
+  const [state, setState] = useState<PeerState>("waiting");
   const [pairInfo, setPairInfo] = useState<string | null>(null);
   const [videoInfo, setVideoInfo] = useState<string | null>(null);
   const [audioInfo, setAudioInfo] = useState<string | null>(null);
@@ -26,6 +30,10 @@ export function View() {
   const audioRef = useRef<HTMLAudioElement>(null);
   const boosterRef = useRef<Booster | null>(null);
   const receiverRef = useRef<Receiver | null>(null);
+  const volumeRef = useRef(volume);
+  useEffect(() => {
+    volumeRef.current = volume;
+  }, [volume]);
 
   useEffect(() => {
     if (isValidCode(initialCode)) join(initialCode);
@@ -33,16 +41,12 @@ export function View() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   function join(code: string) {
-    if (!isValidCode(code)) {
-      setStatus("Code must be 6 letters or digits");
-      return;
-    }
     leave();
     history.replaceState(null, "", `/view?code=${code}`);
 
     const receiver = new Receiver(code, {
       log,
-      onState: (state) => setStatus(stateText(state, "the sharer")),
+      onState: setState,
       onPath: setPairInfo,
       onVideo: setVideoInfo,
       onAudio: setAudioInfo,
@@ -53,13 +57,15 @@ export function View() {
         if (track.kind === "video") setHasVideo(true);
         if (track.kind === "audio") {
           boosterRef.current?.close();
-          boosterRef.current = createBooster(track, volume / 100);
+          boosterRef.current = createBooster(track, volumeRef.current / 100);
           if (audioRef.current) audioRef.current.srcObject = boosterRef.current.stream;
           // A muted *track* means no audio packets are arriving, unlike a muted element.
           log(`audio track: ${track.muted ? "waiting for packets" : "live"}`);
           track.onmute = () => log("audio track: packets stopped");
           track.onunmute = () => log("audio track: packets flowing");
           setHasAudio(true);
+          // Sound was on before a reconnect: keep it on if the browser allows.
+          if (audioRef.current && !audioRef.current.paused) void boosterRef.current.resume();
         }
       },
       onPeerGone: () => {
@@ -80,6 +86,12 @@ export function View() {
     receiverRef.current?.stop();
     receiverRef.current = null;
     setJoinedCode(null);
+    setState("waiting");
+  }
+
+  function exit() {
+    leave();
+    history.replaceState(null, "", "/view");
   }
 
   async function toggleMute() {
@@ -109,92 +121,67 @@ export function View() {
     saveVolume(percent);
   }
 
-  function fullscreen() {
-    videoRef.current?.requestFullscreen?.().catch((err: Error) => log(`fullscreen refused: ${err.message}`));
+  const stats = [
+    { label: "Path", value: pairInfo },
+    { label: "Video", value: videoInfo },
+    { label: "Audio", value: audioInfo },
+  ];
+
+  if (joinedCode === null) {
+    return (
+      <Shell>
+        <section className="hero compact">
+          <div className="hero-icon"><Icon name="eye" size={28} /></div>
+          <h1>Watch a screen</h1>
+          <p className="lede">Enter the code shown on the sharing device.</p>
+          <CodeEntry initial={initialCode} action="Watch" onSubmit={join} />
+        </section>
+      </Shell>
+    );
   }
 
   return (
-    <main className="page">
-      <header className="bar">
-        <a href="/" className="brand">Argus</a>
-        <span className={`status ${status === "Connected" ? "ok" : ""}`}>{status}</span>
-      </header>
-
-      {joinedCode === null ? (
-        <section className="card center">
-          <form
-            className="row"
-            onSubmit={(e) => {
-              e.preventDefault();
-              join(normalizeCode(codeInput));
-            }}
-          >
-            <input
-              className="input code-input"
-              value={codeInput}
-              onChange={(e) => setCodeInput(e.target.value.toUpperCase())}
-              placeholder="ROOM CODE"
-              maxLength={6}
-              autoFocus
-              autoComplete="off"
-              spellCheck={false}
-            />
-            <button className="button" type="submit">Watch</button>
-          </form>
-        </section>
-      ) : (
-        <section className="card">
-          <div className="code-row">
-            <div>
-              <div className="label">Room</div>
-              <div className="code">{joinedCode}</div>
-            </div>
-            <div className="grow">
-              {pairInfo && <div className="muted small-text">path: {pairInfo}</div>}
-              {videoInfo && <div className="muted small-text">video: {videoInfo}</div>}
-              {audioInfo && <div className="muted small-text">audio: {audioInfo}</div>}
-            </div>
-            <div className="col">
-              <button className="button small" onClick={() => void toggleMute()} disabled={!hasAudio}>
-                {!hasAudio ? "No audio" : muted ? "Unmute" : "Mute"}
-              </button>
-              <button className="button small" onClick={fullscreen} disabled={!hasVideo}>Fullscreen</button>
-              <button className="button small danger" onClick={() => { leave(); setStatus("Enter a room code"); }}>Leave</button>
-            </div>
-          </div>
-        </section>
-      )}
-
-      <video ref={videoRef} className={`video ${hasVideo ? "" : "hidden"}`} autoPlay muted playsInline />
-      <audio ref={audioRef} />
-      {hasAudio && muted && <p className="muted small-text">Audio is available. Click Unmute to hear it.</p>}
-      {hasAudio && (
-        <div className="row start volume">
-          <span className="label">Volume</span>
-          <input
-            type="range"
-            min={0}
-            max={300}
-            step={10}
-            value={volume}
-            onChange={(e) => changeVolume(Number(e.target.value))}
-            aria-label="Volume"
-          />
-          <span className={`small-text ${volume > 100 ? "warn" : "muted"}`}>{volume}%</span>
-          {volume !== 100 && (
-            <button className="button small secondary" onClick={() => changeVolume(100)}>Reset</button>
-          )}
+    <Shell status={stateText(state, "the sharer")} tone={toneOf(state)}>
+      <div className="watch-bar">
+        <div className="watch-room">
+          <span className="eyebrow">Room</span>
+          <span className="code-inline">{joinedCode}</span>
         </div>
-      )}
+        <div className="btn-row">
+          <button className="btn btn-ghost" onClick={() => receiverRef.current?.retry()} title="Rejoin the room">
+            <Icon name="refresh" size={16} /> Reconnect
+          </button>
+          <button className="btn btn-ghost danger" onClick={exit}>
+            <Icon name="logout" size={16} /> Leave
+          </button>
+        </div>
+      </div>
+
+      <Player
+        ref={videoRef}
+        state={state}
+        hasVideo={hasVideo}
+        hasAudio={hasAudio}
+        muted={muted}
+        volume={volume}
+        onToggleMute={() => void toggleMute()}
+        onVolume={changeVolume}
+        onRetry={() => receiverRef.current?.retry()}
+        stats={stats}
+        log={log}
+      />
+      <audio ref={audioRef} />
+
       {hasVideo && !hasAudio && (
-        <p className="muted small-text">
-          The sharer isn't sending sound. Window shares never carry audio. Share the entire screen (Windows, recent
-          Chrome on Mac) or a browser tab, and tick "Share audio" in the picker.
+        <p className="hint">
+          <Icon name="info" size={16} /> No sound from the sharer. Window shares never include audio. Ask them to share the
+          entire screen or a browser tab with "Share audio" ticked.
         </p>
       )}
+      {hasVideo && <p className="hint subtle desktop-only">Shortcuts: M mute · F fullscreen · ↑ ↓ volume · double-click for fullscreen</p>}
 
-      <LogPanel lines={lines} />
-    </main>
+      <Details stats={stats} lines={lines} />
+    </Shell>
   );
 }
 
@@ -202,8 +189,9 @@ const VOLUME_KEY = "argus.viewerVolume";
 
 function readVolume(): number {
   try {
-    const saved = Number(localStorage.getItem(VOLUME_KEY));
-    return saved >= 0 && saved <= 300 && localStorage.getItem(VOLUME_KEY) !== null ? saved : 100;
+    const raw = localStorage.getItem(VOLUME_KEY);
+    const saved = Number(raw);
+    return raw !== null && saved >= 0 && saved <= 300 ? saved : 100;
   } catch {
     return 100;
   }

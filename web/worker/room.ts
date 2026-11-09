@@ -56,7 +56,8 @@ export class RoomDO extends DurableObject<Env> {
     // Diagnostics for `wrangler tail` / Workers Logs. The browser string helps spot odd
     // clients (TV browsers, old WebViews) when a connection fails.
     log({ event: "join", room, role, peerPresent, ua: request.headers.get("User-Agent") ?? "?" });
-    this.broadcast(other, { type: "peer-joined", role });
+    const resume = new URL(request.url).searchParams.get("resume") === "1";
+    this.broadcast(other, { type: "peer-joined", role, resume });
 
     return new Response(null, { status: 101, webSocket: client });
   }

@@ -17,8 +17,11 @@ import {
 } from "./peer";
 import { Signaling, type Role, type SignalMessage } from "./signaling";
 
-/** "waiting" covers both "no peer yet" and "peer left". */
-export type PeerState = "waiting" | "connecting" | "connected" | "failed";
+/**
+ * "waiting" covers both "no peer yet" and "peer left". "reconnecting": our link to the
+ * room dropped and is coming back. "replaced": this room/role was opened elsewhere.
+ */
+export type PeerState = "waiting" | "connecting" | "connected" | "failed" | "reconnecting" | "replaced";
 
 export interface SessionHandlers {
   log: Logger;
@@ -38,6 +41,8 @@ export interface ReceiverHandlers extends SessionHandlers {
 
 const STATS_INTERVAL_MS = 2000;
 const STATS_REPORT_EVERY = 3; // polls; i.e. one relay log line per 6s
+const AUTO_RETRY_DELAY_MS = 2500;
+const AUTO_RETRY_MAX = 3;
 
 export function stateText(state: PeerState, waitingFor: string): string {
   switch (state) {
@@ -48,7 +53,11 @@ export function stateText(state: PeerState, waitingFor: string): string {
     case "connected":
       return "Connected";
     case "failed":
-      return "Connection failed (no path between the two networks?)";
+      return "Couldn't connect";
+    case "reconnecting":
+      return "Reconnecting…";
+    case "replaced":
+      return "Opened in another tab";
   }
 }
 
@@ -76,6 +85,7 @@ abstract class Session {
   start(): void {
     if (this.active) return;
     this.active = true;
+    window.addEventListener("pagehide", this.onPageHide);
     this.setState("waiting");
     // Servers must be known before signaling starts: openPeer runs synchronously when an
     // offer arrives, so that ICE for it isn't mistaken for stale.
@@ -88,15 +98,45 @@ abstract class Session {
 
   private connectSignaling(): void {
     const sig = new Signaling(this.code, this.role);
-    sig.onStatus = (status, detail) => this.log(`signaling socket: ${status}${detail ? ` (${detail})` : ""}`);
+    sig.onStatus = (status, detail) => {
+      this.log(`signaling socket: ${status}${detail ? ` (${detail})` : ""}`);
+      // A live call doesn't need the room link; media keeps flowing peer to peer.
+      if (status === "reconnecting" && !this.isConnected()) this.setState("reconnecting");
+      if (status === "replaced") {
+        // Another tab/device took our place. Drop the call and don't auto-retry, or the
+        // two would keep kicking each other out; only a deliberate Retry takes it back.
+        this.closePeer();
+        this.setState("replaced");
+      }
+    };
     sig.onMessage = (message) => {
+      if (message.type === "hello" && !this.isConnected()) this.setState("waiting");
       this.handle(message).catch((err: Error) => this.log(`failed handling ${message.type}: ${err.message}`));
     };
     sig.connect();
     this.sig = sig;
   }
 
+  /** Drop the current attempt and rejoin the room from scratch; the sender re-offers. */
+  retry(): void {
+    if (!this.active) return;
+    this.log("retrying: rejoining the room");
+    this.closePeer();
+    this.sig?.close();
+    this.setState("waiting");
+    this.connectSignaling();
+  }
+
+  protected isConnected(): boolean {
+    return this.pc?.connectionState === "connected";
+  }
+
+  // Tab closed or navigated away: tell the other side right away instead of letting
+  // it wait for the connection to time out.
+  private readonly onPageHide = () => this.stop();
+
   stop(): void {
+    window.removeEventListener("pagehide", this.onPageHide);
     this.active = false;
     this.sig?.send({ type: "bye" });
     this.closePeer();
@@ -105,6 +145,29 @@ abstract class Session {
   }
 
   protected abstract handle(message: SignalMessage): Promise<void>;
+  protected onConnected(): void {}
+  protected onFailed(): void {}
+
+  /**
+   * peer-left only means the other side's *room link* closed. A live call survives
+   * that (a Wi-Fi blip on their signaling socket), so keep it; a real departure arrives
+   * as "bye", or as the connection failing.
+   */
+  protected peerLeft(who: string): void {
+    if (this.isConnected()) {
+      this.log(`${who}'s room link dropped; call still up`);
+      return;
+    }
+    this.log(`${who} left`);
+    this.closePeer();
+    this.setState("waiting");
+  }
+
+  protected peerSaidBye(who: string): void {
+    this.log(`${who} left`);
+    this.closePeer();
+    this.setState("waiting");
+  }
 
   protected log(line: string): void {
     this.handlers.log(line);
@@ -134,10 +197,12 @@ abstract class Session {
         this.watchPairs(pc);
       } else if (pc.connectionState === "connected") {
         this.setState("connected");
+        this.onConnected();
         this.pollStats(pc);
       } else if (pc.connectionState === "failed") {
         this.setState("failed");
         void this.logPairs(pc);
+        this.onFailed();
       }
     };
     return pc;
@@ -219,9 +284,13 @@ export class Sender extends Session {
     switch (message.type) {
       case "hello":
         this.log(`joined room ${this.code}${message.peerPresent ? ", peer already waiting" : ""}`);
-        if (message.peerPresent) await this.offer();
+        if (message.peerPresent && !this.isConnected()) await this.offer();
         break;
       case "peer-joined":
+        if (message.resume && this.isConnected()) {
+          this.log("peer's room link came back; call still up");
+          break;
+        }
         this.log("peer joined");
         await this.offer();
         break;
@@ -235,10 +304,10 @@ export class Sender extends Session {
         if (this.pc && !this.isStale(message)) await this.addIce(this.pc, message.candidate);
         break;
       case "peer-left":
+        this.peerLeft("peer");
+        break;
       case "bye":
-        this.log("peer left");
-        this.closePeer();
-        this.setState("waiting");
+        this.peerSaidBye("peer");
         break;
       case "error":
         this.log(`relay error: ${message.message}`);
@@ -279,12 +348,33 @@ export class Sender extends Session {
 
 export class Receiver extends Session {
   private readonly receiverHandlers: ReceiverHandlers;
+  private retries = 0;
+  private retryTimer: number | undefined;
   // ICE can arrive while the offer is still being applied; hold it until then.
   private pendingIce: RTCIceCandidateInit[] = [];
 
   constructor(code: string, handlers: ReceiverHandlers) {
     super(code, "view", handlers);
     this.receiverHandlers = handlers;
+  }
+
+  protected onConnected(): void {
+    this.retries = 0;
+  }
+
+  // The receiver can't re-offer, so it rejoins the room, which makes the sender offer
+  // again. A few automatic tries cover transient failures; after that the page's Retry.
+  protected onFailed(): void {
+    if (this.retries >= AUTO_RETRY_MAX) return this.log("auto-retry limit reached; use Retry");
+    this.retries++;
+    this.log(`auto-retry ${this.retries}/${AUTO_RETRY_MAX} in ${AUTO_RETRY_DELAY_MS / 1000}s`);
+    window.clearTimeout(this.retryTimer);
+    this.retryTimer = window.setTimeout(() => this.retry(), AUTO_RETRY_DELAY_MS);
+  }
+
+  stop(): void {
+    window.clearTimeout(this.retryTimer);
+    super.stop();
   }
 
   protected async handle(message: SignalMessage): Promise<void> {
@@ -304,10 +394,10 @@ export class Receiver extends Session {
         else this.pendingIce.push(message.candidate);
         break;
       case "peer-left":
+        this.peerLeft("sender");
+        break;
       case "bye":
-        this.log("sender left");
-        this.closePeer();
-        this.setState("waiting");
+        this.peerSaidBye("sender");
         break;
       case "error":
         this.log(`relay error: ${message.message}`);

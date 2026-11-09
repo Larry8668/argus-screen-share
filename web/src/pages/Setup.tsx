@@ -1,17 +1,20 @@
+import { Shell } from "../components/Shell";
 import { CableSetup } from "../components/CableSetup";
+import { Icon } from "../components/Icon";
 
 export function Setup() {
   return (
-    <main className="page">
-      <header className="bar">
-        <a href="/" className="brand">Argus</a>
-        <a href="/listen" className="button small">Open /listen</a>
-      </header>
+    <Shell>
+      <section className="hero compact">
+        <h1>Phone as a mic: setup</h1>
+        <p className="lede">Use your phone as this computer's mic in games, Discord and calls. Once, about 2 minutes.</p>
+      </section>
       <section className="card">
-        <h2 className="flush">Phone as a mic: setup</h2>
-        <p className="muted">Use your phone as this computer's mic in games, Discord and calls. One-time setup.</p>
         <CableSetup />
       </section>
-    </main>
+      <a className="btn btn-primary self-center" href="/listen">
+        Open the listener <Icon name="arrow" size={18} />
+      </a>
+    </Shell>
   );
 }

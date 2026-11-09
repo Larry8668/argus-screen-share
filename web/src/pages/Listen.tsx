@@ -1,20 +1,28 @@
 import { useEffect, useRef, useState } from "react";
-import { generateCode } from "../lib/code";
+import { generateCode, isValidCode, normalizeCode } from "../lib/code";
 import { canChooseOutput, isVirtualCable, listOutputs, namesHidden, setOutput, unlockDeviceNames } from "../lib/audio";
-import { Receiver, stateText } from "../lib/session";
+import { Receiver, stateText, type PeerState } from "../lib/session";
 import { useLog } from "../lib/useLog";
 import { CableSetup } from "../components/CableSetup";
 import { LevelMeter } from "../components/LevelMeter";
-import { LogPanel } from "../components/LogPanel";
+import { Shell } from "../components/Shell";
+import { toneOf } from "../lib/tone";
+import { RoomCard } from "../components/RoomCard";
+import { Details } from "../components/Details";
+import { Icon } from "../components/Icon";
 
 const SAVED_OUTPUT_KEY = "argus.outputDeviceId";
 
 // Desktop side of phone-as-mic: receives the phone's mic and plays it into a chosen
 // output device. Pointing that at a virtual cable makes it a mic for other apps.
 export function Listen() {
-  const [code] = useState(generateCode);
+  // Code kept in the URL so a reload rejoins the same room and the phone reconnects.
+  const [{ code, resumed }] = useState(() => {
+    const fromUrl = normalizeCode(new URLSearchParams(location.search).get("code") ?? "");
+    return isValidCode(fromUrl) ? { code: fromUrl, resumed: true } : { code: generateCode(), resumed: false };
+  });
   const [listening, setListening] = useState(false);
-  const [status, setStatus] = useState("Not listening");
+  const [state, setState] = useState<PeerState | "idle">("idle");
   const [pairInfo, setPairInfo] = useState<string | null>(null);
   const [incoming, setIncoming] = useState<MediaStream | null>(null);
   const [outputs, setOutputs] = useState<MediaDeviceInfo[]>([]);
@@ -29,6 +37,7 @@ export function Listen() {
   const cable = outputs.find(isVirtualCable);
 
   useEffect(() => {
+    history.replaceState(null, "", `/listen?code=${code}`);
     const onChange = () => void refreshOutputs();
     navigator.mediaDevices?.addEventListener("devicechange", onChange);
     return () => {
@@ -52,7 +61,7 @@ export function Listen() {
   async function start() {
     const receiver = new Receiver(code, {
       log,
-      onState: (state) => setStatus(stateText(state, "the phone")),
+      onState: setState,
       onPath: setPairInfo,
       onTrack: (track, stream) => {
         if (track.kind !== "audio") return;
@@ -126,109 +135,122 @@ export function Listen() {
     if (audioRef.current) audioRef.current.srcObject = null;
     setIncoming(null);
     setListening(false);
-    setStatus("Not listening");
+    setState("idle");
   }
 
-  async function copy(text: string) {
-    try {
-      await navigator.clipboard.writeText(text);
-      log("copied to clipboard");
-    } catch {
-      log("clipboard blocked; select and copy manually");
-    }
+  // One <audio> element for the page's whole life: its output device (setSinkId) must
+  // survive switching between the start screen and the live screen.
+  const audioEl = <audio ref={audioRef} />;
+
+  if (!listening) {
+    return (
+      <>
+      <Shell>
+        <section className="hero compact">
+          <div className="hero-icon"><Icon name="ear" size={28} /></div>
+          <h1>Phone as a mic</h1>
+          <p className="lede">
+            {resumed ? (
+              <>Resume listening in room <span className="code-inline">{code}</span>.</>
+            ) : (
+              "Hear your phone's microphone on this computer, and use it in games and calls."
+            )}
+          </p>
+          <button className="btn btn-primary btn-lg" onClick={() => void start()}>
+            Start listening <Icon name="arrow" size={18} />
+          </button>
+        </section>
+        <details className="card setup" open={readSavedOutput() === null}>
+          <summary>First time? One-time setup (2 min)</summary>
+          <CableSetup />
+        </details>
+        {lines.length > 0 && <Details lines={lines} />}
+      </Shell>
+      {audioEl}
+      </>
+    );
   }
+
+  const phoneText = state === "connected" ? "Phone connected" : state === "waiting" ? "Waiting for the phone" : stateText(state as PeerState, "the phone");
 
   return (
-    <main className="page">
-      <header className="bar">
-        <a href="/" className="brand">Argus</a>
-        <span className={`status ${status === "Connected" ? "ok" : ""}`}>{status}</span>
-      </header>
+    <>
+    <Shell status={stateText(state as PeerState, "the phone")} tone={toneOf(state)}>
+      <div className="share-grid">
 
-      {!listening ? (
-        <section className="card center">
-          <p className="muted">
-            Receive a phone's microphone on this computer. Start here, then open the link or enter the code on the phone.
-          </p>
-          <button className="button" onClick={() => void start()}>Start listening</button>
-          <details className="setup" open={readSavedOutput() === null}>
-            <summary>First time? Setup (2 min)</summary>
-            <CableSetup />
-          </details>
-        </section>
-      ) : (
-        <section className="card stack">
-          <div className="code-row">
-            <div>
-              <div className="label">Room code</div>
-              <div className="code">{code}</div>
-            </div>
-            <div className="grow">
-              <div className="label">Open on the phone</div>
-              <div className="url">{micUrl}</div>
-              {pairInfo && <div className="muted small-text">path: {pairInfo}</div>}
-            </div>
-            <div className="col">
-              <button className="button small" onClick={() => void copy(micUrl)}>Copy link</button>
-              <button className="button small danger" onClick={stop}>Stop</button>
-            </div>
-          </div>
+        <div className="share-main">
+          <section className="card stack">
+            <div className="eyebrow">Incoming voice</div>
+            <LevelMeter stream={incoming} />
+            {playBlocked && (
+              <button className="btn btn-primary" onClick={() => void resumePlayback()}>
+                <Icon name="volume" size={16} /> Click to enable audio
+              </button>
+            )}
 
-          <LevelMeter stream={incoming} />
-          {playBlocked && (
-            <button className="button small" onClick={() => void resumePlayback()}>Click to enable audio</button>
-          )}
-
-          {canChooseOutput() ? (
-            <div className="stack">
-              <label className="label" htmlFor="output">Send audio to</label>
-              <div className="row start">
-                <select
-                  id="output"
-                  className="input grow"
-                  value={outputId}
-                  onChange={(e) => void chooseOutput(e.target.value)}
-                >
-                  {!outputs.some((d) => d.deviceId === "default") && <option value="default">System default</option>}
-                  {outputs.map((d, i) => (
-                    <option key={d.deviceId} value={d.deviceId}>{d.label || `Output ${i + 1}`}</option>
-                  ))}
-                </select>
-                {namesHidden(outputs) && (
-                  <button className="button small secondary" onClick={() => void showDeviceNames()}>Show all devices</button>
-                )}
-              </div>
-              {namesHidden(outputs) ? (
-                <p className="muted small-text">
-                  The browser hides speaker names until this page is allowed to use a microphone. Click
-                  "Show all devices" and allow it; nothing is recorded.
-                </p>
-              ) : cable ? (
-                outputId !== cable.deviceId && (
-                  <p className="muted small-text">
-                    Found <strong>{cable.label}</strong>. Pick it here, then choose the matching cable mic in your game.
+            <div className="eyebrow spaced">Send audio to</div>
+            {canChooseOutput() ? (
+              <>
+                <div className="field-row">
+                  <select id="output" className="input" value={outputId} onChange={(e) => void chooseOutput(e.target.value)} aria-label="Output device">
+                    {!outputs.some((d) => d.deviceId === "default") && <option value="default">System default</option>}
+                    {outputs.map((d, i) => (
+                      <option key={d.deviceId} value={d.deviceId}>{d.label || `Output ${i + 1}`}</option>
+                    ))}
+                  </select>
+                  {namesHidden(outputs) && (
+                    <button className="btn btn-ghost" onClick={() => void showDeviceNames()}>Show all devices</button>
+                  )}
+                </div>
+                {namesHidden(outputs) ? (
+                  <p className="hint subtle">
+                    The browser hides speaker names until this page may use a microphone. Click "Show all devices" and
+                    allow it; nothing is recorded.
                   </p>
-                )
-              ) : (
-                <p className="muted small-text">
-                  No virtual cable found, so other apps can't use this as a mic yet.{" "}
-                  <a href="/setup" target="_blank">Setup guide</a> (about 2 minutes, once).
-                </p>
+                ) : cable ? (
+                  outputId === cable.deviceId ? (
+                    <p className="ok-box"><Icon name="check" size={16} /> Going into {cable.label}. Pick the matching cable mic in your game.</p>
+                  ) : (
+                    <p className="hint">Found <strong>{cable.label}</strong>. Pick it above to use the phone as a mic in other apps.</p>
+                  )
+                ) : (
+                  <p className="hint subtle">
+                    No virtual cable found, so other apps can't use this as a mic yet.{" "}
+                    <a href="/setup" target="_blank">Setup guide</a> (2 minutes, once).
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="hint subtle">
+                This browser can't choose an output device, so audio plays on the default speakers. Use Chrome or Edge to
+                route it into a virtual cable.
+              </p>
+            )}
+
+            <button className="btn btn-danger self-start" onClick={stop}>
+              <Icon name="stop" size={16} /> Stop listening
+            </button>
+          </section>
+        </div>
+        <aside className="share-side">
+          <RoomCard code={code} link={micUrl} linkLabel="Open on the phone" log={log}>
+            <div className={`viewer-state tone-${toneOf(state)}`}>
+              <span className="dot" aria-hidden />
+              <span>{phoneText}</span>
+              {state === "failed" && (
+                <button className="btn btn-ghost small" onClick={() => receiverRef.current?.retry()}>
+                  <Icon name="refresh" size={14} /> Retry
+                </button>
               )}
             </div>
-          ) : (
-            <p className="muted small-text">
-              This browser can't choose an output device, so audio plays on the default speakers. Use Chrome or Edge to
-              route it into a virtual cable.
-            </p>
-          )}
-        </section>
-      )}
+          </RoomCard>
+        </aside>
+      </div>
 
-      <audio ref={audioRef} />
-
-      <LogPanel lines={lines} />
-    </main>
+      <Details stats={[{ label: "Path", value: pairInfo }]} lines={lines} />
+    </Shell>
+    {audioEl}
+    </>
   );
 }
 

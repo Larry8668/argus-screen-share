@@ -21,6 +21,10 @@ One participant, one mic, the desktop's screen.
   `/api/ice` adds a TURN relay for networks where direct fails (symmetric NAT,
   blocked UDP). Without them it's STUN-only.
 
+Reloading `/share` or `/listen` keeps the same room code (it lives in the URL), so the
+other side reconnects by itself. The room link reconnects after network blips without
+dropping a live call, and a failed viewer retries automatically.
+
 The room code is the only secret. Anyone with it can watch. One viewer per room; a
 second viewer replaces the first.
 
@@ -83,7 +87,8 @@ web/
 ├── src/pages/Listen.tsx  Desktop mic receiver + output picker
 ├── src/pages/Setup.tsx   Virtual cable setup guide
 ├── src/lib/session.ts  Sender / Receiver (signaling + peer connection)
-├── src/lib/            signaling client, peer helpers, audio, room codes
+├── src/lib/            signaling client (auto-reconnect), peer helpers, audio, room codes
+├── src/components/     Shell, Player, RoomCard, CodeEntry, Details, icons
 ├── scripts/            relay-check.mjs
 └── wrangler.jsonc      Worker, assets, Durable Object binding + migration
 ```
