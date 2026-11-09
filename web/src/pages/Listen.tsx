@@ -233,7 +233,7 @@ export function Listen() {
           </section>
         </div>
         <aside className="share-side">
-          <RoomCard code={code} link={micUrl} linkLabel="Open on the phone" log={log}>
+          <RoomCard code={code} link={micUrl} linkLabel="Open on the phone" log={log} qrOpen>
             <div className={`viewer-state tone-${toneOf(state)}`}>
               <span className="dot" aria-hidden />
               <span>{phoneText}</span>
