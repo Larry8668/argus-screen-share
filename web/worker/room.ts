@@ -26,7 +26,7 @@ type Attachment = { room: string; peer?: string; replaced?: boolean };
 const CLOSE_REPLACED = 4000;
 const CLOSE_FULL = 4001;
 
-const ACCEPTED_TYPES = new Set(["offer", "answer", "ice", "bye", "stats", "knock", "lobby", "admit", "deny"]);
+const ACCEPTED_TYPES = new Set(["offer", "answer", "ice", "bye", "stats", "knock", "lobby", "admit", "deny", "source"]);
 const PEER_ID = /^[a-z0-9]{8,16}$/;
 const MAX_NAME = 40;
 

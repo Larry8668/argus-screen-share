@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { generateCode, isValidCode, normalizeCode } from "../lib/code";
-import { canCapture, captureStream, tuneTrack, unavailableReason, type Source, type Tuning } from "../lib/capture";
+import { canCapture, captureSoundInput, captureStream, noScreenAudioReason, tuneTrack, unavailableReason, type Source, type Tuning } from "../lib/capture";
 import { Sender, stateText, type PeerState } from "../lib/session";
 import { useLog } from "../lib/useLog";
 import { Shell } from "../components/Shell";
@@ -21,6 +21,7 @@ import { useVoiceChat } from "../lib/useVoiceChat";
 import { restrictOwnAudioSupported } from "../lib/voice";
 import { readPrivate, savePrivate } from "../lib/prefs";
 import type { ViewerInfo } from "../lib/session";
+import { SoundInput } from "../components/SoundInput";
 
 type Phase = "idle" | "sharing";
 
@@ -55,6 +56,9 @@ export function Share() {
   const previewRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const senderRef = useRef<Sender | null>(null);
+  // Sound picked from an input device (Stereo Mix, BlackHole…); survives switching screens.
+  const inputRef = useRef<MediaStreamTrack | null>(null);
+  const [inputLabel, setInputLabel] = useState<string | null>(null);
 
   const viewerUrl = `${location.origin}/view?code=${code}`;
 
@@ -68,25 +72,26 @@ export function Share() {
     if (previewRef.current) previewRef.current.srcObject = captured;
   }, [captured]);
 
-  async function start(chosen: Source) {
+  // Ask the browser for a screen/camera. null = cancelled or unavailable (already logged).
+  async function capture(chosen: Source): Promise<MediaStream | null> {
     if (!canCapture(chosen)) {
       log(`${chosen} capture unavailable: ${unavailableReason(chosen)}`);
-      return;
+      return null;
     }
-    let stream: MediaStream;
     try {
-      stream = await captureStream(chosen);
+      return await captureStream(chosen);
     } catch (err) {
       log(`${chosen} capture cancelled or denied: ${(err as Error).name}: ${(err as Error).message}`);
-      return;
+      return null;
     }
+  }
 
+  // Tune a fresh capture, wire its end/mute events and log what it carries.
+  async function prepare(stream: MediaStream, chosen: Source, wanted: Tuning): Promise<RTCDegradationPreference> {
     const [track] = stream.getVideoTracks();
-    // Screen starts tuned for text; camera is always motion.
-    const initial: Tuning = chosen === "screen" ? "text" : "motion";
-    const degradation = chosen === "screen" ? await tuneTrack(track, initial) : "maintain-framerate";
+    const degradation = chosen === "screen" ? await tuneTrack(track, wanted) : "maintain-framerate";
     if (chosen === "camera") track.contentHint = "motion";
-    setTuning(initial);
+    setTuning(chosen === "screen" ? wanted : "motion");
     setSource(chosen);
     track.onended = () => {
       log("capture ended by the browser (stop sharing clicked)");
@@ -110,14 +115,23 @@ export function Share() {
       // displaySurface: "monitor" | "window" | "browser" (tab). Windows never carry audio.
       const surface = (settings as MediaTrackSettings & { displaySurface?: string }).displaySurface;
       log(
-        surface === "window"
-          ? "audio: none — browsers can't capture a single app's sound. Share the entire screen or a tab for audio"
-          : "audio: none — the browser didn't offer it or the share-audio box was unchecked",
+        noScreenAudioReason()
+          ? `audio: none — ${noScreenAudioReason()}`
+          : surface === "window"
+            ? "audio: none — browsers can't capture a single app's sound. Share the entire screen or a tab for audio"
+            : "audio: none — the browser didn't offer it or the share-audio box was unchecked",
       );
     }
-
     streamRef.current = stream;
     setCaptured(stream);
+    return degradation;
+  }
+
+  async function start(chosen: Source) {
+    const stream = await capture(chosen);
+    if (!stream) return;
+    // Screen starts tuned for text; camera is always motion.
+    const degradation = await prepare(stream, chosen, "text");
 
     const sender = new Sender(code, stream, {
       log,
@@ -136,6 +150,75 @@ export function Share() {
     senderRef.current = sender;
 
     setPhase("sharing");
+  }
+
+  // Swap what's shared without ending the share: viewers stay connected.
+  async function switchSource(chosen: Source) {
+    const old = streamRef.current;
+    const stream = await capture(chosen);
+    if (!stream || !senderRef.current) {
+      stream?.getTracks().forEach((t) => t.stop());
+      return;
+    }
+    if (old) for (const t of old.getTracks()) t.onended = null;
+    const input = inputRef.current;
+    if (input && stream.getAudioTracks().length) {
+      log("the new share has its own sound; stopped the sound input");
+      dropInput();
+    } else if (input) {
+      stream.addTrack(input);
+    }
+    const degradation = await prepare(stream, chosen, tuning);
+    await senderRef.current.replaceSource(stream);
+    await senderRef.current.setDegradation(degradation);
+    old?.getTracks().forEach((t) => t !== inputRef.current && t.stop());
+  }
+
+  // Send a sound input as the share's sound (in place of none).
+  async function pickInput(device: MediaDeviceInfo) {
+    const stream = streamRef.current;
+    if (!stream || !senderRef.current) return;
+    let track: MediaStreamTrack;
+    try {
+      [track] = (await captureSoundInput(device.deviceId)).getAudioTracks();
+    } catch (err) {
+      log(`sound input refused: ${(err as Error).name}: ${(err as Error).message}`);
+      return;
+    }
+    for (const t of stream.getAudioTracks()) {
+      stream.removeTrack(t);
+      t.stop();
+    }
+    inputRef.current?.stop();
+    inputRef.current = track;
+    stream.addTrack(track);
+    track.onended = () => {
+      log("sound input ended (unplugged or taken by the system)");
+      void removeInput();
+    };
+    log(`sound from input: ${track.label || device.label}`);
+    setInputLabel(track.label || device.label || "sound input");
+    setCaptured(new MediaStream(stream.getTracks()));
+    await senderRef.current.replaceSource(stream);
+  }
+
+  function dropInput() {
+    const track = inputRef.current;
+    if (!track) return;
+    track.onended = null;
+    track.stop();
+    streamRef.current?.removeTrack(track);
+    inputRef.current = null;
+    setInputLabel(null);
+  }
+
+  async function removeInput() {
+    dropInput();
+    log("sound input removed");
+    const stream = streamRef.current;
+    if (!stream) return;
+    setCaptured(new MediaStream(stream.getTracks()));
+    await senderRef.current?.replaceSource(stream);
   }
 
   useAutoTune(phase === "sharing" && source === "screen" && autoTune, videoInfo, tuning, (next, why) => {
@@ -187,6 +270,8 @@ export function Share() {
     setCaptured(null);
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+    inputRef.current = null;
+    setInputLabel(null);
     setPhase("idle");
     setState("idle");
   }
@@ -232,7 +317,9 @@ export function Share() {
             <span className="choice-icon"><Icon name="screen" size={26} /></span>
             <span className="choice-title">Share screen</span>
             <span className="choice-body">
-              {screenOk ? "A whole screen, a window or a browser tab. Tick “Share audio” for sound." : unavailableReason("screen")}
+              {screenOk
+                ? noScreenAudioReason() ?? "A whole screen, a window or a browser tab. Tick “Share audio” for sound."
+                : unavailableReason("screen")}
             </span>
           </button>
           <button className="choice" onClick={() => void start("camera")} disabled={!cameraOk}>
@@ -277,9 +364,14 @@ export function Share() {
               quality={quality}
               onQuality={chooseQuality}
             />
-            <button className="btn btn-danger" onClick={stop}>
-              <Icon name="stop" size={16} /> Stop sharing
-            </button>
+            <div className="btn-row">
+              <button className="btn btn-ghost" onClick={() => void switchSource(source)} title="Pick another screen, window or tab; viewers stay connected">
+                <Icon name="refresh" size={16} /> Change {source === "screen" ? "screen" : "camera"}
+              </button>
+              <button className="btn btn-danger" onClick={stop}>
+                <Icon name="stop" size={16} /> Stop sharing
+              </button>
+            </div>
           </div>
         </div>
 
@@ -304,19 +396,26 @@ export function Share() {
             <p className="hint subtle">You hear every viewer; viewers hear you, not each other.</p>
           </section>
 
-          <section className="card">
+          <section className="card stack">
             <div className="eyebrow">Sound</div>
-            {hasSound ? (
-              <>
-                <LevelMeter stream={captured} />
-                <p className="hint subtle">Should move when something plays. Flat? On a Mac, share a Chrome tab instead.</p>
-              </>
-            ) : (
+            {hasSound && <LevelMeter stream={captured} />}
+            {hasSound && !inputLabel && (
+              <p className="hint subtle">Should move when something plays. Flat? On a Mac, share a Chrome tab instead.</p>
+            )}
+            {!hasSound && (
               <p className="hint subtle">
                 {source === "camera"
                   ? "Camera shares are video only."
-                  : 'Not sharing sound. Window shares never include audio; stop and share the entire screen or a tab with "Share audio" ticked.'}
+                  : noScreenAudioReason() ?? 'Not sharing sound. Window shares never include audio. Pick the entire screen or a tab with "Share audio" ticked.'}
               </p>
+            )}
+            {!hasSound && source === "screen" && !noScreenAudioReason() && (
+              <button className="btn btn-ghost" onClick={() => void switchSource("screen")}>
+                <Icon name="refresh" size={16} /> Pick again with sound
+              </button>
+            )}
+            {(!hasSound || inputLabel) && (
+              <SoundInput active={inputLabel} onPick={(d) => void pickInput(d)} onRemove={() => void removeInput()} log={log} />
             )}
           </section>
         </aside>

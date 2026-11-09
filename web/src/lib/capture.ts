@@ -60,6 +60,21 @@ export async function captureStream(source: Source): Promise<MediaStream> {
   });
 }
 
+export function isFirefox(): boolean {
+  return /Firefox\//.test(navigator.userAgent);
+}
+
+/**
+ * Firefox and Safari never offer sound in the screen picker, whatever is picked.
+ * Returns a one-line note for those browsers, null where sound can be shared.
+ */
+export function noScreenAudioReason(): string | null {
+  const ua = navigator.userAgent;
+  if (isFirefox()) return "Firefox can't share sound. Use Chrome or Edge for audio.";
+  if (/Safari\//.test(ua) && !/Chrome|Chromium|Edg\//.test(ua)) return "Safari can't share sound. Use Chrome or Edge for audio.";
+  return null;
+}
+
 /** Human explanation for why a source isn't available, for the idle screen. */
 export function unavailableReason(source: Source): string {
   if (!navigator.mediaDevices) {
@@ -68,4 +83,33 @@ export function unavailableReason(source: Source): string {
   return source === "screen"
     ? "This browser can't capture its own screen. Phone browsers don't offer screen capture to websites; use a desktop browser to share a screen, or share the camera instead."
     : "This browser has no camera access.";
+}
+
+/**
+ * Sound inputs the browser can capture like a mic. "Stereo Mix" (Windows), BlackHole
+ * (Mac) or a virtual cable carry the computer's own sound this way, which is how a
+ * Firefox/Safari share (no screen sound) or a window share can still have audio.
+ * Labels are empty until the page has mic permission, so ask once if needed.
+ */
+export async function listSoundInputs(): Promise<MediaDeviceInfo[]> {
+  const inputs = async () => (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "audioinput");
+  let found = await inputs();
+  if (found.length && found.every((d) => !d.label)) {
+    const probe = await navigator.mediaDevices.getUserMedia({ audio: true });
+    probe.getTracks().forEach((t) => t.stop());
+    found = await inputs();
+  }
+  return found;
+}
+
+/** Likely carries computer sound rather than a real mic. */
+export function looksLikeSystemSound(label: string): boolean {
+  return /stereo mix|what u hear|wave out|loopback|blackhole|soundflower|cable output|vb-audio|voicemeeter|monitor of/i.test(label);
+}
+
+/** Capture an input as-is: voice processing would mangle music and game sound. */
+export function captureSoundInput(deviceId: string): Promise<MediaStream> {
+  return navigator.mediaDevices.getUserMedia({
+    audio: { deviceId: { exact: deviceId }, echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 2 },
+  });
 }

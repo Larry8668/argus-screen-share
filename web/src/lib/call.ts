@@ -46,6 +46,8 @@ export class Call {
   voiceStats: string | null = null;
   /** The sendrecv audio section used for talk-over voice; null when the call has none. */
   voice: RTCRtpTransceiver | null = null;
+  /** Sharer side: the screen video and screen-sound sections, kept so the source can be swapped live. */
+  media: { video: RTCRtpTransceiver | null; audio: RTCRtpTransceiver | null } = { video: null, audio: null };
 
   private readonly opts: CallOptions;
   private timer: number | undefined;

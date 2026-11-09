@@ -9,6 +9,7 @@
 // is asked first (admit/deny); in a public room the offer goes out straight away.
 
 import { Call, type CallOptions, type CallState } from "./call";
+import { isFirefox } from "./capture";
 import { loadIceServers, preferH264, type Logger } from "./peer";
 import { Signaling, type Role, type SignalMessage } from "./signaling";
 
@@ -46,6 +47,8 @@ export interface ReceiverHandlers extends SessionHandlers {
   onTrack?: (track: MediaStreamTrack, stream: MediaStream) => void;
   /** The current call ended; drop any media that came from it. */
   onPeerGone?: () => void;
+  /** Whether the sharer is sending screen sound right now (changes when they switch source). */
+  onScreenAudio?: (on: boolean) => void;
 }
 
 /** One viewer as the sharer sees it. */
@@ -245,7 +248,10 @@ export interface SenderOptions {
 }
 
 export class Sender extends Session {
-  private readonly stream: MediaStream;
+  private stream: MediaStream;
+  // Stable stream id for the shared media, so swapping the source keeps the viewer's
+  // <video> on the same MediaStream.
+  private readonly mediaStream = new MediaStream();
   private readonly senderHandlers: SenderHandlers;
   private readonly withVoice: boolean;
   // A stream of its own for the voice track, so it never shares an msid with the screen.
@@ -389,6 +395,32 @@ export class Sender extends Session {
     }
   }
 
+  /**
+   * Swap what's shared (another screen, window or tab, with or without sound) on every
+   * live call. replaceTrack keeps the connection; viewers just see the new picture.
+   */
+  async replaceSource(stream: MediaStream): Promise<void> {
+    this.stream = stream;
+    const [video] = stream.getVideoTracks();
+    const [audio] = stream.getAudioTracks();
+    await Promise.all(
+      [...this.viewers.values()].map(async (v) => {
+        const call = v.call;
+        if (!call) return;
+        try {
+          await call.media.video?.sender.replaceTrack(video ?? null);
+          await call.media.audio?.sender.replaceTrack(audio ?? null);
+          await this.applyDegradation(call);
+          this.send({ type: "source", to: v.peer, screenAudio: !!audio });
+        } catch (err) {
+          this.log(`${this.label(v.peer)}: couldn't switch source (${(err as Error).message}); reconnecting them`);
+          await this.offer(v.peer);
+        }
+      }),
+    );
+    this.log(`switched source: video ${video ? "yes" : "no"}, sound ${audio ? "yes" : "no"}`);
+  }
+
   /** "maintain-resolution" keeps text sharp (fps drops); "maintain-framerate" keeps motion smooth (resolution drops). */
   async setDegradation(preference: RTCDegradationPreference): Promise<void> {
     this.degradation = preference;
@@ -405,7 +437,7 @@ export class Sender extends Session {
 
   // Encoder settings that live on the RTP sender: degradation preference + bitrate cap.
   private async applyDegradation(call: Call): Promise<void> {
-    const sender = call.pc.getSenders().find((s) => s.track?.kind === "video");
+    const sender = call.media.video?.sender ?? call.pc.getSenders().find((s) => s.track?.kind === "video");
     if (!sender) return;
     try {
       const params = sender.getParameters();
@@ -431,7 +463,17 @@ export class Sender extends Session {
     viewer.pending = false;
 
     const { pc } = call;
-    for (const track of this.stream.getTracks()) pc.addTrack(track, this.stream);
+    // One section per kind, added even when that kind is missing now (a screen share
+    // with no sound still gets an audio section), so a later source switch is just
+    // replaceTrack: no new offer/answer, no rejoin.
+    const [video] = this.stream.getVideoTracks();
+    const [audio] = this.stream.getAudioTracks();
+    if (video || this.withVoice) {
+      call.media.video = pc.addTransceiver(video ?? "video", { direction: "sendonly", streams: [this.mediaStream] });
+    }
+    if (audio || this.withVoice) {
+      call.media.audio = pc.addTransceiver(audio ?? "audio", { direction: "sendonly", streams: [this.mediaStream] });
+    }
     if (this.withVoice) {
       // Voice rides each sharer↔viewer call, so the sharer hears every viewer and every
       // viewer hears the sharer. Viewers don't hear each other: that would need
@@ -448,7 +490,16 @@ export class Sender extends Session {
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
     if (viewer.call !== call || this.viewers.get(peer) !== viewer) return; // superseded meanwhile
-    this.send({ type: "offer", to: peer, id: call.id, sdp: offer.sdp!, voiceMid: call.voice?.mid ?? undefined });
+    this.send({
+      type: "offer",
+      to: peer,
+      id: call.id,
+      sdp: offer.sdp!,
+      voiceMid: call.voice?.mid ?? undefined,
+      screenAudio: !!audio,
+      // Firefox's H.264 encoder (software OpenH264) adapts badly to the network; let it use VP8.
+      preferH264: !isFirefox(),
+    });
     log("offer sent");
     this.update();
   }
@@ -623,7 +674,12 @@ export class Receiver extends Session {
         this.setState("declined");
         break;
       case "offer":
-        await this.answer(message.id, message.sdp, message.voiceMid);
+        await this.answer(message.id, message.sdp, message.voiceMid, message.preferH264 !== false);
+        this.receiverHandlers.onScreenAudio?.(message.screenAudio !== false);
+        break;
+      case "source":
+        this.log(`sharer switched source; sound ${message.screenAudio ? "on" : "off"}`);
+        this.receiverHandlers.onScreenAudio?.(message.screenAudio);
         break;
       case "ice":
         if (this.call && this.call.id === message.id) await this.call.addIce(message.candidate);
@@ -665,7 +721,7 @@ export class Receiver extends Session {
     this.receiverHandlers.onPeerGone?.();
   }
 
-  private async answer(id: string, sdp: string, voiceMid: string | undefined): Promise<void> {
+  private async answer(id: string, sdp: string, voiceMid: string | undefined, wantH264: boolean): Promise<void> {
     this.closeCall();
     const log = (line: string) => this.log(line);
     const call = this.openCall(id, log, {}, {
@@ -711,7 +767,11 @@ export class Receiver extends Session {
         log(`voice section ${voiceMid} not found in the offer`);
       }
     }
-    preferH264(pc, log);
+    // Firefox lists H.264 even before its OpenH264 plugin is downloaded (black video if
+    // picked) and encodes screens poorly with it, so H.264 is only asked for when
+    // neither side is Firefox.
+    if (wantH264 && !isFirefox()) preferH264(pc, log);
+    else log(`codec: ${wantH264 ? "this browser is" : "sharer is on"} Firefox, keeping the default (VP8)`);
     await call.flushIce();
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);

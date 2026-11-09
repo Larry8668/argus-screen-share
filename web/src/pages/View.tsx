@@ -28,7 +28,10 @@ export function View() {
   const [videoInfo, setVideoInfo] = useState<string | null>(null);
   const [audioInfo, setAudioInfo] = useState<string | null>(null);
   const [hasVideo, setHasVideo] = useState(false);
-  const [hasAudio, setHasAudio] = useState(false);
+  const [audioTrack, setAudioTrack] = useState(false);
+  // The sharer's audio section exists even when they share no sound; this says if it carries any.
+  const [sharerSound, setSharerSound] = useState(true);
+  const hasAudio = audioTrack && sharerSound;
   const [muted, setMuted] = useState(true); // autoplay policy: must start muted
   const [volume, setVolume] = useState(readVolume); // percent; above 100 is boosted
   const [lines, log] = useLog();
@@ -77,20 +80,21 @@ export function View() {
           log(`audio track: ${track.muted ? "waiting for packets" : "live"}`);
           track.onmute = () => log("audio track: packets stopped");
           track.onunmute = () => log("audio track: packets flowing");
-          setHasAudio(true);
+          setAudioTrack(true);
           // Sound was on before a reconnect: keep it on if the browser allows.
           if (audioRef.current && !audioRef.current.paused) void boosterRef.current.resume();
         }
       },
       onPeerGone: () => {
         setHasVideo(false);
-        setHasAudio(false);
+        setAudioTrack(false);
         if (videoRef.current) videoRef.current.srcObject = null;
         if (audioRef.current) audioRef.current.srcObject = null;
         boosterRef.current?.close();
         boosterRef.current = null;
       },
       onVoiceTrack: voice.onVoiceTrack,
+      onScreenAudio: setSharerSound,
     }, { name });
     voice.bind(receiver);
     receiver.start();

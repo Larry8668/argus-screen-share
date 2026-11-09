@@ -19,7 +19,9 @@ export type SignalMessage =
   // id ties an answer and ICE candidates to the offer (and peer connection) they belong
   // to, so replies to a superseded offer can be recognised and dropped.
   // voiceMid: the media section carrying talk-over voice, as opposed to screen audio.
-  | ({ type: "offer"; id: string; sdp: string; voiceMid?: string } & Routed)
+  | ({ type: "offer"; id: string; sdp: string; voiceMid?: string; screenAudio?: boolean; preferH264?: boolean } & Routed)
+  // Sharer → viewer: what's being shared changed (the call stays up; only tracks swapped).
+  | ({ type: "source"; screenAudio: boolean } & Routed)
   | ({ type: "answer"; id: string; sdp: string } & Routed)
   | ({ type: "ice"; id: string; candidate: RTCIceCandidateInit } & Routed)
   | ({ type: "bye" } & Routed)
