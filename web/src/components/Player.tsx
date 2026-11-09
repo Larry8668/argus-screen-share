@@ -173,13 +173,6 @@ export const Player = forwardRef<HTMLVideoElement, PlayerProps>(function Player(
 
       {!hasVideo && (overlay ?? <StateOverlay state={state} onRetry={onRetry} />)}
 
-      {hasVideo && hasAudio && muted && (
-        <button className="unmute-prompt" onClick={onToggleMute}>
-          <Icon name="volumeOff" size={20} />
-          Tap to unmute
-        </button>
-      )}
-
       {hasVideo && state !== "connected" && (
         <div className="badge badge-wait">
           <span className="spinner small" aria-hidden /> {state === "failed" ? "Connection lost" : "Reconnecting…"}
@@ -207,6 +200,7 @@ export const Player = forwardRef<HTMLVideoElement, PlayerProps>(function Player(
               label={!hasAudio ? "No audio from the sharer" : muted ? "Unmute (M)" : "Mute (M)"}
               onClick={onToggleMute}
               disabled={!hasAudio}
+              attention={hasAudio && muted}
             >
               <Icon name={!hasAudio || muted ? "volumeOff" : "volume"} />
             </IconButton>
@@ -317,17 +311,20 @@ function IconButton({
   onClick,
   disabled,
   active,
+  attention,
   children,
 }: {
   label: string;
   onClick: () => void;
   disabled?: boolean;
   active?: boolean;
+  /** Sound is waiting: a soft pulse so the muted button is easy to find. */
+  attention?: boolean;
   children: ReactNode;
 }) {
   return (
     <button
-      className={`icon-btn ${active ? "active" : ""}`}
+      className={`icon-btn ${active ? "active" : ""} ${attention ? "attention" : ""}`}
       onClick={onClick}
       disabled={disabled}
       aria-label={label}

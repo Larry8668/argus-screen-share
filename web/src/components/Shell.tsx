@@ -14,7 +14,7 @@ export function Shell({ status, tone = "idle", children }: { status?: string; to
     <div className="shell">
       <header className="topbar">
         <a href="/" className="brand">
-          <span className="brand-mark" aria-hidden />
+          <img className="brand-mark" src="/icon.svg" alt="" aria-hidden />
           Argus
         </a>
         <nav className="nav">

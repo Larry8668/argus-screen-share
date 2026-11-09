@@ -20,7 +20,7 @@ export interface VoiceChat {
   micError: string | null;
   toggleMic: () => Promise<void>;
   toggleVoice: () => void;
-  /** Allow voice playback; call from a user gesture (e.g. Tap to unmute). */
+  /** Allow voice playback; call from a user gesture (e.g. the unmute button). */
   unlock: () => void;
   /** Wire into SessionHandlers.onVoiceTrack. */
   onVoiceTrack: (peer: string, track: MediaStreamTrack | null) => void;

@@ -1,105 +1,172 @@
-# Argus
+<p align="center">
+  <img src="docs/images/logo.svg" width="96" alt="Argus logo">
+</p>
 
-Peer-to-peer screen sharing in the browser, plus a phone-as-microphone mode.
+<h1 align="center">Argus</h1>
 
-Live: https://argus.arry8668.workers.dev
+<p align="center">
+  <b>Your screen, anywhere.</b><br>
+  Peer-to-peer screen sharing in the browser, plus your phone as a microphone.<br>
+  No installs, no accounts.
+</p>
 
-## Why
+<p align="center">
+  <a href="https://argus.arry8668.workers.dev"><b>Open Argus →</b></a>
+</p>
 
-A desktop with no mic can't be the device you join a call from. Argus lets that desktop
-push its screen to whatever device *is* on the call, so you share the viewer tab there.
-One participant, one mic, the desktop's screen.
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/watch-light.png">
+  <img src="docs/images/watch.png" alt="Watching a shared screen in Argus">
+</picture>
+
+## What it does
+
+- **Share a screen, window or tab** to up to 4 viewers: laptop, phone or TV browser.
+- **Sub-second and private.** Video goes straight between browsers (WebRTC); the server
+  only introduces them. When a network blocks direct connections, a TURN relay steps in.
+- **Sound** with the picture (Chrome/Edge), or from a sound input like Stereo Mix in any browser.
+- **Talk** both ways while sharing. Either side can switch their mic or the others' voices off.
+- **Change screen** mid-share without anyone rejoining.
+- **TV friendly**: the TV shows a code and a QR, you type it on the computer. No remote typing.
+- **Private rooms**: viewers give a name and wait for you to let them in.
+- **Phone as a mic** for a computer without one.
+- Zoom, fit/fill, rotate (phones), picture-in-picture, volume boost to 300%, data saver,
+  installable as an app.
+
+<table>
+  <tr>
+    <td width="62%">
+      <picture>
+        <source media="(prefers-color-scheme: light)" srcset="docs/images/share-light.png">
+        <img src="docs/images/share.png" alt="Sharer view: preview, room code, viewers, talk and sound">
+      </picture>
+    </td>
+    <td width="38%">
+      <picture>
+        <source media="(prefers-color-scheme: light)" srcset="docs/images/phone-light.png">
+        <img src="docs/images/phone.png" alt="Watching on a phone">
+      </picture>
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <picture>
+        <source media="(prefers-color-scheme: light)" srcset="docs/images/tv-code-light.png">
+        <img src="docs/images/tv-code.png" alt="TV showing a code to enter on the computer">
+      </picture>
+    </td>
+    <td>
+      <picture>
+        <source media="(prefers-color-scheme: light)" srcset="docs/images/mic-light.png">
+        <img src="docs/images/mic.png" alt="Phone used as a microphone">
+      </picture>
+    </td>
+  </tr>
+</table>
+
+## Use it
+
+**Share a screen**
+1. On the computer, open [`/share`](https://argus.arry8668.workers.dev/share) → **Share screen**.
+2. Send the code or link to whoever's watching. They open it and the picture appears.
+
+**Watch on a TV**
+1. On the TV browser, open [`/view`](https://argus.arry8668.workers.dev/view) → **Show a code on this screen**.
+2. On the computer: `/share` → **Have a code from a TV?** → type it in.
+
+**Sound**
+- Chrome or Edge: pick **Entire screen** (Windows) or a **tab**, and tick *Share audio*.
+  Window shares never carry sound.
+- Firefox and Safari can't share sound. Use **Use a sound input** on the share page with
+  Stereo Mix (Windows) or a virtual cable like BlackHole (Mac).
+
+**Phone as a mic**
+1. Computer: [`/listen`](https://argus.arry8668.workers.dev/listen) → Start listening.
+2. Phone: [`/mic`](https://argus.arry8668.workers.dev/mic) → enter the code → Start mic.
+3. For games and call apps, the computer needs a free virtual cable once (VB-Cable on
+   Windows, BlackHole on Mac). The [`/setup`](https://argus.arry8668.workers.dev/setup)
+   page walks through it.
+
+Something off? Open **Connection details → Report a problem** on either side. It sends
+the connection log (never video, audio or IP addresses) and shows a report ID.
 
 ## How it works
 
-- `/share` captures a screen or window with `getDisplayMedia` and sends it over WebRTC.
-- `/view` receives it. Open it with `?code=XXXXXX` or type the code in.
-- A Cloudflare Worker serves both pages. One Durable Object per room code relays the
-  WebRTC handshake (offer, answer, ICE candidates) over WebSockets. After the handshake
-  the video goes directly between the two browsers; the Worker carries no media.
-- NAT traversal: STUN first (direct path). If the Worker has TURN secrets set,
-  `/api/ice` adds a TURN relay for networks where direct fails (symmetric NAT,
-  blocked UDP). Without them it's STUN-only.
+```mermaid
+flowchart LR
+  S["Sharer browser<br/>/share"] -- "offer / answer / ICE<br/>(WebSocket)" --> R["Cloudflare Worker<br/>+ Durable Object per room"]
+  R -- "relayed" --> V["Viewer browser<br/>/view"]
+  S == "video + audio (WebRTC, peer to peer)" ==> V
+  S -. "only if direct fails" .-> T["TURN relay"] -.-> V
+```
 
-Reloading `/share` or `/listen` keeps the same room code (it lives in the URL), so the
-other side reconnects by itself. The room link reconnects after network blips without
-dropping a live call, and a failed viewer retries automatically.
+- A **Cloudflare Worker** serves the app. Each room code maps to one **Durable Object**
+  that relays the WebRTC handshake between the sharer and viewers over WebSockets. It never
+  sees the media.
+- Browsers then connect directly, using **STUN** to find their public addresses. On
+  networks where that fails (symmetric NAT, blocked UDP), media goes through a **TURN**
+  relay instead. Diagnostics show which path won: `host` (same network), `srflx`
+  (direct over the internet) or `relay`.
+- The sharer sends one stream per viewer (a mesh), hence the 4-viewer cap.
+- Codecs: H.264 by default so TVs and phones decode in hardware; VP8 whenever Firefox is
+  on either side.
+- Links survive network blips: the room connection reconnects on its own, and a live call
+  isn't dropped while it does.
 
-Up to 4 viewers per room. Video goes peer to peer, so the sharer uploads one stream per
-viewer. In a public room (the default) the code is the only secret. Tick **Private
-room** on `/share` and each viewer gives a name and waits for you to click Allow.
-
-Sharer and viewers can talk: **Mic** sends your voice, **Voice** mutes the others.
-Viewers hear the sharer, not each other. In Chrome 141+ viewers' voices are kept out of
-the shared system audio (`restrictOwnAudio`); elsewhere the sharer needs headphones.
-
-## Use
-
-1. On the machine to share: open `/share`, click **Share screen**, pick a screen (phones: **Share camera**).
-2. On the device that's on the call: open the viewer link shown on the share page.
-3. Share that tab into the call.
-
-Both pages have a diagnostics panel. Once connected it shows the ICE path:
-`host ↔ host` is same network, `srflx ↔ srflx` is direct across the internet,
-`relay` means it went through TURN. The `video:` and `audio:` lines show bitrate,
-fps, codec and packets. On `/share`, **Optimize for Video** trades sharpness for
-smoothness on slow paths.
-
-## Phone as a mic
-
-Talk into your phone; the desktop hears it as a mic. `/mic` on the phone sends,
-`/listen` on the desktop receives. Games and call apps need a free virtual cable on
-the desktop, once. A browser can't create a mic device itself.
-
-**Windows**
-1. Download [VB-Cable](https://vb-audio.com/Cable/) and unzip it.
-2. Right-click `VBCABLE_Setup_x64.exe` → Run as administrator → Install Driver. Reboot.
-3. `/listen` → Start listening → Show all devices → pick **CABLE Input**.
-4. Phone: `/mic` → enter the code → Start mic.
-5. Set **CABLE Output** as the mic in Windows Sound settings, Discord or the game.
-
-**macOS**: same, with `brew install blackhole-2ch` and **BlackHole 2ch** at both ends.
-
-Troubleshooting: `/setup` on the live site.
+Everything runs on free tiers (Cloudflare Workers, Durable Objects, ExpressTURN).
 
 ## Develop
 
-```
+```sh
 cd web
 npm install
-npm run dev            # Vite + local Worker and Durable Object
+npm run dev            # Vite + local Worker and Durable Objects
 npm run build          # typecheck + build
+npm run lint
 npm run deploy         # build + wrangler deploy
-npm run check:relay    # signaling smoke test against the deployed Worker
-node scripts/relay-check.mjs localhost:5173   # same, against `npm run dev`
+npm run check:relay    # signaling checks against the live Worker
+node scripts/relay-check.mjs localhost:5173   # same, against npm run dev
+npm run reports        # list problem reports (R-XXXXXX to read one)
 ```
 
 Needs Node 20+ and a Cloudflare account (`npx wrangler login`).
 
-TURN (optional): `npx wrangler secret put TURN_URLS` (comma-separated `turn:` URLs),
-`TURN_USERNAME`, `TURN_CREDENTIAL`. For local dev, put the same keys in
-`web/.dev.vars`. Live logs: `npx wrangler tail argus`. After changing
-`wrangler.jsonc`, run `npm run cf-typegen` to refresh `worker-configuration.d.ts`.
+**Secrets** (`npx wrangler secret put NAME`; for local dev put them in `web/.dev.vars`):
 
-## Layout
+| Name | What |
+| --- | --- |
+| `TURN_URLS` | Comma-separated `turn:` URLs. Optional: without TURN it's STUN only. |
+| `TURN_USERNAME`, `TURN_CREDENTIAL` | TURN credentials. |
+| `REPORTS_TOKEN` | Lets `npm run reports` read problem reports. |
+
+Live logs: `npx wrangler tail argus`. After editing `wrangler.jsonc`, run `npm run cf-typegen`.
+
+<details>
+<summary>Project layout</summary>
 
 ```
 web/
-├── worker/index.ts     Worker entry: /api/health, /api/room/:code/ws, static assets
-├── worker/room.ts      RoomDO — per-room WebSocket signaling relay + diagnostics logs
-├── src/pages/Share.tsx Capture + offer
-├── src/pages/View.tsx  Answer + play
-├── src/pages/Mic.tsx   Phone mic sender
-├── src/pages/Listen.tsx  Desktop mic receiver + output picker
-├── src/pages/Setup.tsx   Virtual cable setup guide
-├── src/lib/session.ts  Sender / Receiver (signaling + peer connection)
-├── src/lib/            signaling client (auto-reconnect), peer helpers, audio, room codes
-├── src/components/     Shell, Player, RoomCard, CodeEntry, Details, icons
-├── scripts/            relay-check.mjs
-└── wrangler.jsonc      Worker, assets, Durable Object binding + migration
+├── worker/
+│   ├── index.ts        Routes: /api/health, /api/ice, /api/room/:code/ws, /api/report(s)
+│   ├── room.ts         RoomDO: per-room signaling relay (up to 4 viewers) + logs
+│   └── reports.ts      ReportsDO: problem reports in SQLite, kept 30 days
+├── src/
+│   ├── pages/          Home, Share, View, Mic, Listen, Setup
+│   ├── components/     Player, RoomCard, ViewerList, SoundInput, TvCode, QrCode, Details…
+│   └── lib/
+│       ├── session.ts  Sender (one call per viewer) and Receiver
+│       ├── call.ts     One RTCPeerConnection: ICE, stats, diagnostics
+│       ├── signaling.ts  WebSocket client with auto-reconnect
+│       ├── capture.ts  Screen, camera and sound-input capture
+│       └── …           voice chat, audio boost, auto-tuning, data saver, prefs
+├── public/             Logo, app icons, manifest
+├── scripts/            relay-check.mjs, reports.mjs
+└── wrangler.jsonc      Worker, assets, Durable Objects
 ```
 
-The previous FFmpeg + HLS + localtunnel version lives in git history (before `f7aefeb`).
+</details>
+
+The first version (FFmpeg + HLS + localtunnel) lives in git history before `f7aefeb`.
 
 ## License
 
