@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 
-const MAX_LINES = 200;
+const MAX_LINES = 500;
 
 /** Timestamped, capped log lines for on-page diagnostics. */
 export function useLog(): [string[], (line: string) => void] {

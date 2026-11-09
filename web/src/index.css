@@ -335,6 +335,11 @@ select.input { cursor: pointer; }
 .stats dd { margin: 0; color: var(--text); word-break: break-word; }
 .log-head { display: flex; justify-content: space-between; align-items: center; padding: .6rem 1rem 0; border-top: 1px solid var(--border); }
 .log-head .btn { padding: .25rem .6rem; font-size: .78rem; }
+.report { margin: .75rem 1rem 0; display: flex; flex-direction: column; gap: .6rem; }
+.report textarea { resize: vertical; font-size: .9rem; }
+.report .ok-box { flex-wrap: wrap; }
+.report .ok-box .btn { margin-left: auto; padding: .25rem .6rem; font-size: .78rem; }
+.field-error.left { text-align: left; }
 .log { margin: .6rem 1rem 1rem; max-height: 240px; overflow: auto; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .75rem; font-family: var(--mono); font-size: .75rem; color: var(--muted); white-space: pre-wrap; }
 
 /* ---------- setup guide ---------- */

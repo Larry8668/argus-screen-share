@@ -17,9 +17,15 @@
 	// One Durable Object instance per room code acts as the signaling relay between
 	// the sharer and the viewer. SQLite-backed classes are required on the free plan.
 	"durable_objects": {
-		"bindings": [{ "name": "ROOM", "class_name": "RoomDO" }]
+		"bindings": [
+			{ "name": "ROOM", "class_name": "RoomDO" },
+			{ "name": "REPORTS", "class_name": "ReportsDO" }
+		]
 	},
-	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["RoomDO"] }],
+	"migrations": [
+		{ "tag": "v1", "new_sqlite_classes": ["RoomDO"] },
+		{ "tag": "v2", "new_sqlite_classes": ["ReportsDO"] }
+	],
 	"upload_source_maps": true
 	/**
 	 * Smart Placement

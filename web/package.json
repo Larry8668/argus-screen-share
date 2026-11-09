@@ -10,7 +10,8 @@
     "preview": "npm run build && vite preview",
     "deploy": "npm run build && wrangler deploy",
     "cf-typegen": "wrangler types",
-    "check:relay": "node scripts/relay-check.mjs"
+    "check:relay": "node scripts/relay-check.mjs",
+    "reports": "node scripts/reports.mjs"
   },
   "dependencies": {
     "react": "^19.2.8",
