@@ -73,11 +73,45 @@ export async function sendReport(input: ReportInput): Promise<string> {
   return data.id;
 }
 
+/** Plain-text version for pasting into a chat when sending isn't possible. */
+export function reportText(input: ReportInput): string {
+  const r = buildReport(input);
+  const env = r.environment;
+  return [
+    `Argus report · ${r.createdAt}`,
+    `page ${r.page}${r.room ? ` · room ${r.room}` : ""}`,
+    r.note && `note: ${r.note}`,
+    `browser: ${env.userAgent}`,
+    `screen ${env.screen} · ${env.network ? `${env.network.effectiveType ?? "?"} network` : "network ?"} · online ${env.online}`,
+    ...Object.entries(r.stats).map(([k, v]) => `${k}: ${v}`),
+    r.errors.length ? `errors:\n${r.errors.join("\n")}` : "",
+    `log:\n${r.log.join("\n")}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function reportFile(input: ReportInput): File {
+  const name = `argus-report-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+  return new File([JSON.stringify(buildReport(input), null, 2)], name, { type: "application/json" });
+}
+
+export function canShareReport(): boolean {
+  return typeof navigator.share === "function";
+}
+
+/** Opens the OS share sheet (WhatsApp, Discord, mail…) with the report attached, or as text. */
+export async function shareReport(input: ReportInput): Promise<void> {
+  const file = reportFile(input);
+  if (navigator.canShare?.({ files: [file] })) await navigator.share({ files: [file], title: "Argus report" });
+  else await navigator.share({ title: "Argus report", text: reportText(input) });
+}
+
 export function downloadReport(input: ReportInput): void {
-  const blob = new Blob([JSON.stringify(buildReport(input), null, 2)], { type: "application/json" });
+  const blob = reportFile(input);
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = `argus-report-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+  a.download = blob.name;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }

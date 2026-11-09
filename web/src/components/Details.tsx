@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { downloadReport, sendReport } from "../lib/diagnostics";
+import { canShareReport, downloadReport, reportText, sendReport, shareReport } from "../lib/diagnostics";
 import { CopyButton } from "./CopyButton";
 import { Icon } from "./Icon";
 
@@ -79,11 +79,23 @@ export function Details({ stats = [], lines }: { stats?: StatLine[]; lines: stri
                 <button className="btn btn-primary" onClick={() => void submit()} disabled={send.kind === "sending"}>
                   {send.kind === "sending" ? "Sending…" : "Send report"}
                 </button>
+              </div>
+              <div className="btn-row">
+                <span className="hint subtle">Or send it yourself:</span>
+                <CopyButton text={reportText({ lines, stats, note })} label="Copy report" />
+                {canShareReport() && (
+                  <button
+                    className="btn btn-ghost"
+                    onClick={() => shareReport({ lines, stats, note }).catch(() => {})}
+                  >
+                    Share…
+                  </button>
+                )}
                 <button className="btn btn-ghost" onClick={() => downloadReport({ lines, stats, note })}>
-                  Download instead
+                  Download
                 </button>
               </div>
-              {send.kind === "error" && <p className="field-error left">Couldn't send ({send.message}). Use Download instead.</p>}
+              {send.kind === "error" && <p className="field-error left">Couldn't send ({send.message}). Use Copy report, Share or Download and send it in a chat.</p>}
               <p className="hint subtle">
                 Sends this page's log, stats, errors and browser details. No video, audio or IP addresses. Kept 30 days.
               </p>
