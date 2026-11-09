@@ -214,13 +214,14 @@ export async function describePairs(pc: RTCPeerConnection): Promise<string[]> {
 /**
  * Audio flow summary. Sender: packets sent. Receiver: packets received and the current
  * level (0 = silence), which tells "nothing arriving" apart from "arriving but silent".
+ * `pick` filters by media section (mid), to keep talk-over voice apart from screen audio.
  */
-export async function describeAudio(pc: RTCPeerConnection): Promise<string | null> {
+export async function describeAudio(pc: RTCPeerConnection, pick: (mid: string | undefined) => boolean = () => true): Promise<string | null> {
   const stats = await pc.getStats();
   let summary: string | null = null;
   stats.forEach((report) => {
-    const r = report as { type: string; kind?: string; packetsSent?: number; packetsReceived?: number; audioLevel?: number };
-    if (r.kind !== "audio") return;
+    const r = report as { type: string; kind?: string; mid?: string; packetsSent?: number; packetsReceived?: number; audioLevel?: number };
+    if (r.kind !== "audio" || !pick(r.mid)) return;
     if (r.type === "outbound-rtp") summary = `sending · ${r.packetsSent ?? 0} packets`;
     if (r.type === "inbound-rtp") {
       summary = `receiving · ${r.packetsReceived ?? 0} packets · level ${(r.audioLevel ?? 0).toFixed(2)}`;

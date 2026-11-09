@@ -11,6 +11,11 @@ import { Details } from "../components/Details";
 import { Icon } from "../components/Icon";
 import { TvCode } from "../components/TvCode";
 import { useWakeLock } from "../lib/useWakeLock";
+import { AdmissionOverlay, NameChip } from "../components/Admission";
+import { isAdmissionState } from "../lib/session";
+import { VoiceControls } from "../components/VoiceControls";
+import { useVoiceChat } from "../lib/useVoiceChat";
+import { readName, saveName } from "../lib/prefs";
 
 export function View() {
   const params = new URLSearchParams(location.search);
@@ -27,6 +32,8 @@ export function View() {
   const [muted, setMuted] = useState(true); // autoplay policy: must start muted
   const [volume, setVolume] = useState(readVolume); // percent; above 100 is boosted
   const [lines, log] = useLog();
+  const [name, setName] = useState(readName);
+  const voice = useVoiceChat(log);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   // Sound plays through its own element, started from the Unmute press. TV and Android
@@ -83,13 +90,22 @@ export function View() {
         boosterRef.current?.close();
         boosterRef.current = null;
       },
-    });
+      onVoiceTrack: voice.onVoiceTrack,
+    }, { name });
+    voice.bind(receiver);
     receiver.start();
     receiverRef.current = receiver;
     setJoinedCode(code);
   }
 
+  function changeName(next: string) {
+    setName(next);
+    saveName(next);
+    receiverRef.current?.setName(next);
+  }
+
   function leave() {
+    voice.bind(null);
     receiverRef.current?.stop();
     receiverRef.current = null;
     setJoinedCode(null);
@@ -111,6 +127,7 @@ export function View() {
       return;
     }
     audio.muted = false;
+    voice.unlock(); // same tap allows the sharer's voice to play
     try {
       // Called straight from the button press, which is what autoplay policies require.
       await boosterRef.current?.resume();
@@ -167,11 +184,13 @@ export function View() {
           <span className="code-inline">{joinedCode}</span>
         </div>
         <div className="btn-row">
+          <NameChip name={name} onChange={changeName} />
+          {voice.available && <VoiceControls voice={voice} who="the sharer" />}
           <button className="btn btn-ghost" onClick={() => receiverRef.current?.retry()} title="Rejoin the room">
-            <Icon name="refresh" size={16} /> Reconnect
+            <Icon name="refresh" size={16} /> <span className="btn-label">Reconnect</span>
           </button>
-          <button className="btn btn-ghost danger" onClick={exit}>
-            <Icon name="logout" size={16} /> Leave
+          <button className="btn btn-ghost danger" onClick={exit} title="Leave">
+            <Icon name="logout" size={16} /> <span className="btn-label">Leave</span>
           </button>
         </div>
       </div>
@@ -190,6 +209,19 @@ export function View() {
         onRetry={() => receiverRef.current?.retry()}
         stats={stats}
         log={log}
+        overlay={
+          isAdmissionState(state) ? (
+            <AdmissionOverlay
+              state={state}
+              name={name}
+              onName={changeName}
+              onAskAgain={() => receiverRef.current?.knock()}
+              onRetry={() => receiverRef.current?.retry()}
+            />
+          ) : undefined
+        }
+        micOn={voice.micOn}
+        onToggleMic={voice.available ? () => void voice.toggleMic() : undefined}
       />
       <audio ref={audioRef} />
 

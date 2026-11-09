@@ -2,6 +2,8 @@
 // feature: phone browsers don't expose it to web pages at all, so the page must
 // detect it rather than assume it. Camera capture (getUserMedia) works everywhere.
 
+import { restrictOwnAudioSupported } from "./voice";
+
 export type Source = "screen" | "camera";
 
 /** Text = sharp, full 1080p, fps may drop. Motion = smooth, 720p, sharpness may drop. */
@@ -42,7 +44,8 @@ export async function captureStream(source: Source): Promise<MediaStream> {
     // gain on a TV. The browser downscales; aspect ratio is kept.
     return navigator.mediaDevices.getDisplayMedia({
       video: { width: { max: 1920 }, height: { max: 1080 }, frameRate: { ideal: 30, max: 30 } },
-      audio: true,
+      // restrictOwnAudio: leave this page's own sound (viewers' voices) out of system audio.
+      audio: restrictOwnAudioSupported() ? { restrictOwnAudio: true } : true,
       systemAudio: "include",
     } as DisplayMediaStreamOptions);
   }

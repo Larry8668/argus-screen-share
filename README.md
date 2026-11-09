@@ -25,8 +25,13 @@ Reloading `/share` or `/listen` keeps the same room code (it lives in the URL), 
 other side reconnects by itself. The room link reconnects after network blips without
 dropping a live call, and a failed viewer retries automatically.
 
-The room code is the only secret. Anyone with it can watch. One viewer per room; a
-second viewer replaces the first.
+Up to 4 viewers per room. Video goes peer to peer, so the sharer uploads one stream per
+viewer. In a public room (the default) the code is the only secret. Tick **Private
+room** on `/share` and each viewer gives a name and waits for you to click Allow.
+
+Sharer and viewers can talk: **Mic** sends your voice, **Voice** mutes the others.
+Viewers hear the sharer, not each other. In Chrome 141+ viewers' voices are kept out of
+the shared system audio (`restrictOwnAudio`); elsewhere the sharer needs headphones.
 
 ## Use
 
@@ -66,6 +71,7 @@ npm run dev            # Vite + local Worker and Durable Object
 npm run build          # typecheck + build
 npm run deploy         # build + wrangler deploy
 npm run check:relay    # signaling smoke test against the deployed Worker
+node scripts/relay-check.mjs localhost:5173   # same, against `npm run dev`
 ```
 
 Needs Node 20+ and a Cloudflare account (`npx wrangler login`).

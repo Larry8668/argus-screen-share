@@ -417,6 +417,11 @@ select.input { cursor: pointer; }
 
 /* ---------- small screens ---------- */
 @media (max-width: 640px) {
+  /* Viewer bar: one compact row; Reconnect/Leave become icon-only (titles keep them labelled). */
+  .watch-bar { gap: .6rem; }
+  .watch-bar .btn-row { gap: .35rem; flex-wrap: wrap; }
+  .watch-bar .btn { padding: .45rem .6rem; font-size: .82rem; }
+  .watch-bar .btn-label { display: none; }
   .topbar { gap: .6rem; flex-wrap: wrap; }
   .nav { order: 3; width: 100%; overflow-x: auto; }
   .page { padding-top: 1.25rem; }
