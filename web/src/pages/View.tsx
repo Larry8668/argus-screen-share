@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { isValidCode, normalizeCode } from "../lib/code";
+import { createBooster, type Booster } from "../lib/audio";
 import { Receiver, stateText } from "../lib/session";
 import { useLog } from "../lib/useLog";
 import { LogPanel } from "../components/LogPanel";
@@ -15,6 +16,7 @@ export function View() {
   const [hasVideo, setHasVideo] = useState(false);
   const [hasAudio, setHasAudio] = useState(false);
   const [muted, setMuted] = useState(true); // autoplay policy: must start muted
+  const [volume, setVolume] = useState(readVolume); // percent; above 100 is boosted
   const [lines, log] = useLog();
 
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -22,6 +24,7 @@ export function View() {
   // browsers can ignore un-muting a <video> that autoplayed muted, so the video element
   // stays muted for good and only carries pictures.
   const audioRef = useRef<HTMLAudioElement>(null);
+  const boosterRef = useRef<Booster | null>(null);
   const receiverRef = useRef<Receiver | null>(null);
 
   useEffect(() => {
@@ -49,7 +52,9 @@ export function View() {
         if (video.srcObject !== stream) video.srcObject = stream;
         if (track.kind === "video") setHasVideo(true);
         if (track.kind === "audio") {
-          if (audioRef.current) audioRef.current.srcObject = new MediaStream([track]);
+          boosterRef.current?.close();
+          boosterRef.current = createBooster(track, volume / 100);
+          if (audioRef.current) audioRef.current.srcObject = boosterRef.current.stream;
           // A muted *track* means no audio packets are arriving, unlike a muted element.
           log(`audio track: ${track.muted ? "waiting for packets" : "live"}`);
           track.onmute = () => log("audio track: packets stopped");
@@ -62,6 +67,8 @@ export function View() {
         setHasAudio(false);
         if (videoRef.current) videoRef.current.srcObject = null;
         if (audioRef.current) audioRef.current.srcObject = null;
+        boosterRef.current?.close();
+        boosterRef.current = null;
       },
     });
     receiver.start();
@@ -87,12 +94,19 @@ export function View() {
     audio.muted = false;
     try {
       // Called straight from the button press, which is what autoplay policies require.
+      await boosterRef.current?.resume();
       await audio.play();
       setMuted(false);
       log("unmuted, audio playing");
     } catch (err) {
       log(`audio play refused: ${(err as Error).name}: ${(err as Error).message}`);
     }
+  }
+
+  function changeVolume(percent: number) {
+    setVolume(percent);
+    boosterRef.current?.setGain(percent / 100);
+    saveVolume(percent);
   }
 
   function fullscreen() {
@@ -154,14 +168,51 @@ export function View() {
       <video ref={videoRef} className={`video ${hasVideo ? "" : "hidden"}`} autoPlay muted playsInline />
       <audio ref={audioRef} />
       {hasAudio && muted && <p className="muted small-text">Audio is available. Click Unmute to hear it.</p>}
+      {hasAudio && (
+        <div className="row start volume">
+          <span className="label">Volume</span>
+          <input
+            type="range"
+            min={0}
+            max={300}
+            step={10}
+            value={volume}
+            onChange={(e) => changeVolume(Number(e.target.value))}
+            aria-label="Volume"
+          />
+          <span className={`small-text ${volume > 100 ? "warn" : "muted"}`}>{volume}%</span>
+          {volume !== 100 && (
+            <button className="button small secondary" onClick={() => changeVolume(100)}>Reset</button>
+          )}
+        </div>
+      )}
       {hasVideo && !hasAudio && (
         <p className="muted small-text">
-          The sharer isn't sending sound. To include it, share a browser tab (any OS) or the entire screen on Windows,
-          and tick "Share audio" in the picker.
+          The sharer isn't sending sound. Window shares never carry audio. Share the entire screen (Windows, recent
+          Chrome on Mac) or a browser tab, and tick "Share audio" in the picker.
         </p>
       )}
 
       <LogPanel lines={lines} />
     </main>
   );
+}
+
+const VOLUME_KEY = "argus.viewerVolume";
+
+function readVolume(): number {
+  try {
+    const saved = Number(localStorage.getItem(VOLUME_KEY));
+    return saved >= 0 && saved <= 300 && localStorage.getItem(VOLUME_KEY) !== null ? saved : 100;
+  } catch {
+    return 100;
+  }
+}
+
+function saveVolume(percent: number): void {
+  try {
+    localStorage.setItem(VOLUME_KEY, String(percent));
+  } catch {
+    // Storage blocked; the level just won't be remembered.
+  }
 }

@@ -62,6 +62,7 @@ a { color: var(--accent-hover); }
 .stack p { margin: 0; }
 .stack.tight { gap: .35rem; margin-top: .75rem; }
 .row.tune { margin-top: .75rem; }
+.row.volume input[type="range"] { flex: 1; max-width: 18rem; accent-color: var(--accent); }
 
 .row { display: flex; gap: .75rem; justify-content: center; flex-wrap: wrap; }
 .row.start { justify-content: flex-start; align-items: center; }

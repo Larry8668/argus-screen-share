@@ -59,7 +59,13 @@ export function Share() {
       audio.onmute = () => log("audio capture: no sound frames (on macOS: check System Settings → Privacy → Screen & System Audio Recording)");
       audio.onunmute = () => log("audio capture: sound frames flowing");
     } else if (source === "screen") {
-      log("audio: none — the browser didn't offer it or the share-audio box was unchecked");
+      // displaySurface: "monitor" | "window" | "browser" (tab). Windows never carry audio.
+      const surface = (settings as MediaTrackSettings & { displaySurface?: string }).displaySurface;
+      log(
+        surface === "window"
+          ? "audio: none — browsers can't capture a single app's sound. Share the entire screen or a tab for audio"
+          : "audio: none — the browser didn't offer it or the share-audio box was unchecked",
+      );
     }
 
     streamRef.current = stream;

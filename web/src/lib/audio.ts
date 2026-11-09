@@ -86,3 +86,40 @@ export async function setOutput(element: HTMLMediaElement, deviceId: string): Pr
 export function isVirtualCable(device: MediaDeviceInfo): boolean {
   return /cable input|vb-audio|blackhole/i.test(device.label);
 }
+
+// ---- volume boost (viewer side) ----
+
+export interface Booster {
+  /** Stream to play: the input track after the gain stage. */
+  stream: MediaStream;
+  /** 1 = as sent, 2 = 200%. Above ~2 loud sources start to clip (distort). */
+  setGain(gain: number): void;
+  /** AudioContexts start suspended outside a click; call this from one. */
+  resume(): Promise<void>;
+  close(): void;
+}
+
+/**
+ * Routes an audio track through a Web Audio GainNode so it can go past 100%, which an
+ * <audio> element's volume (max 1.0) can't. Chrome only plays remote WebRTC audio
+ * through Web Audio if the original stream is also attached to a media element; the
+ * viewer's muted <video> already holds it.
+ */
+export function createBooster(track: MediaStreamTrack, gain: number): Booster {
+  const ctx = new AudioContext();
+  const source = ctx.createMediaStreamSource(new MediaStream([track]));
+  const gainNode = ctx.createGain();
+  gainNode.gain.value = gain;
+  const out = ctx.createMediaStreamDestination();
+  source.connect(gainNode).connect(out);
+  return {
+    stream: out.stream,
+    // Short ramp so dragging the slider doesn't click.
+    setGain: (g) => gainNode.gain.setTargetAtTime(g, ctx.currentTime, 0.02),
+    resume: () => ctx.resume(),
+    close: () => {
+      source.disconnect();
+      void ctx.close();
+    },
+  };
+}
