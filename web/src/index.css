@@ -351,6 +351,65 @@ select.input { cursor: pointer; }
 .guide .more li { margin: .35rem 0; }
 .guide code { font-family: var(--mono); font-size: .85em; background: var(--panel-2); border: 1px solid var(--border); border-radius: 5px; padding: .05rem .35rem; }
 
+/* ---------- QR ---------- */
+/* The SVG paints its own white quiet zone; the frame only keeps it off a dark card edge. */
+.qr { display: block; border-radius: 8px; max-width: 100%; height: auto; }
+.qr-box { display: flex; flex-direction: column; align-items: center; gap: .4rem; padding: .25rem 0 .1rem; }
+.btn.icon-only { padding-left: .7rem; padding-right: .7rem; }
+.btn-ghost.is-on { border-color: var(--accent); color: var(--accent-hover); }
+
+/* ---------- share settings ---------- */
+.settings-row { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.auto-pick { color: var(--muted); font-weight: 400; }
+.tv-entry { align-self: center; width: 100%; max-width: 760px; }
+.tv-entry summary { cursor: pointer; display: inline-flex; align-items: center; gap: .5rem; color: var(--muted); font-size: .92rem; padding: .4rem .2rem; list-style: none; }
+.tv-entry summary::-webkit-details-marker { display: none; }
+.tv-entry summary:hover { color: var(--text); }
+.tv-entry[open] summary { color: var(--text); margin-bottom: .6rem; }
+.tv-entry .code-entry { justify-content: flex-start; }
+
+/* ---------- player: fit / zoom ---------- */
+.player video.fit-cover { object-fit: cover; }
+.player video { transform-origin: 50% 50%; will-change: transform; }
+.zoom-chip {
+  position: absolute; top: .9rem; left: 50%; transform: translateX(-50%); z-index: 2;
+  padding: .35rem .8rem; border-radius: 999px; border: 1px solid rgba(255, 255, 255, .2);
+  background: rgba(15, 16, 20, .78); color: #fff; font: inherit; font-size: .8rem; font-weight: 600;
+  font-variant-numeric: tabular-nums; cursor: pointer; backdrop-filter: blur(6px);
+}
+.zoom-chip:hover { background: var(--accent); }
+.zoom-btns { display: contents; }
+@media (hover: none) { .zoom-btns { display: none; } }
+@media (max-width: 520px) { .icon-btn { width: 34px; height: 34px; } .zoom-btns { display: none; } }
+
+/* ---------- watch: "show a code on this screen" ---------- */
+.or-divider { display: flex; align-items: center; gap: .8rem; width: 100%; max-width: 560px; align-self: center; color: var(--faint); font-size: .8rem; text-transform: uppercase; letter-spacing: .09em; }
+.or-divider::before, .or-divider::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+.tv-choice { align-self: center; width: 100%; max-width: 560px; }
+.tv-choice:focus-visible { border-color: var(--accent); outline-offset: 3px; }
+
+.tv-code + .player { display: none; } /* stays mounted to receive the stream */
+.tv-code {
+  display: flex; align-items: center; justify-content: center; gap: clamp(1.5rem, 5vw, 4rem); flex-wrap: wrap;
+  padding: clamp(1.5rem, 4vw, 3rem); border-radius: var(--radius); background: var(--panel); border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+@media (min-width: 900px) { .tv-code { min-height: min(70vh, 640px); } }
+.tv-steps { display: flex; flex-direction: column; gap: 1.25rem; min-width: 0; }
+.tv-steps ol { margin: 0; padding-left: 1.6em; font-size: clamp(1.15rem, 2.4vw, 1.9rem); font-weight: 500; line-height: 1.35; }
+.tv-steps li + li { margin-top: .35rem; }
+.tv-host { display: inline-block; font-family: var(--mono); color: var(--accent-hover); overflow-wrap: anywhere; }
+.tv-digits { display: flex; gap: clamp(.3rem, 1vw, .7rem); }
+.tv-digits span {
+  width: clamp(2.6rem, 9vw, 7.5rem); aspect-ratio: 4 / 5; display: grid; place-items: center;
+  font-family: var(--mono); font-weight: 700; font-size: clamp(2rem, 7vw, 6.5rem); line-height: 1;
+  background: var(--panel-2); border: 2px solid var(--border-strong); border-radius: 12px; color: var(--text);
+}
+.tv-status { display: flex; align-items: center; gap: .6rem; margin: 0; color: var(--warn); font-size: clamp(1rem, 1.6vw, 1.3rem); font-weight: 500; }
+.dot.pulse { animation: pulse 1.4s ease-in-out infinite; }
+.tv-qr { display: flex; flex-direction: column; align-items: center; gap: .6rem; color: var(--muted); font-size: .95rem; }
+.tv-qr .qr { width: clamp(150px, 20vw, 240px); height: auto; }
+
 /* ---------- small screens ---------- */
 @media (max-width: 640px) {
   .topbar { gap: .6rem; flex-wrap: wrap; }

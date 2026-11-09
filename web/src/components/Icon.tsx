@@ -21,6 +21,12 @@ const PATHS = {
   back: "M19 12H5M11 6l-6 6 6 6",
   logout: "M15 4h4v16h-4M10 8l-4 4 4 4M6 12h11",
   chart: "M4 20V10M10 20V4M16 20v-7M22 20H2",
+  qr: "M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h3v3h-3zM20 14v.01M14 20h.01M17 17h4v4h-4",
+  zoomIn: "M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM21 21l-5-5M11 8v6M8 11h6",
+  zoomOut: "M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM21 21l-5-5M8 11h6",
+  fit: "M3 5h18v14H3zM8 9l-2 3 2 3M16 9l2 3-2 3",
+  fill: "M3 5h18v14H3zM7 9V7h3M17 9V7h-3M7 15v2h3M17 15v2h-3",
+  tv: "M3 6h18v12H3zM8 21h8M9 2l3 3 3-3",
 } as const;
 
 export type IconName = keyof typeof PATHS;

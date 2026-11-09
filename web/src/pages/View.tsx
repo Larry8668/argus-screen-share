@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { isValidCode, normalizeCode } from "../lib/code";
+import { generateCode, isValidCode, normalizeCode } from "../lib/code";
 import { createBooster, type Booster } from "../lib/audio";
 import { Receiver, stateText, type PeerState } from "../lib/session";
 import { useLog } from "../lib/useLog";
@@ -9,10 +9,15 @@ import { CodeEntry } from "../components/CodeEntry";
 import { Player } from "../components/Player";
 import { Details } from "../components/Details";
 import { Icon } from "../components/Icon";
+import { TvCode } from "../components/TvCode";
+import { useWakeLock } from "../lib/useWakeLock";
 
 export function View() {
-  const initialCode = normalizeCode(new URLSearchParams(location.search).get("code") ?? "");
+  const params = new URLSearchParams(location.search);
+  const initialCode = normalizeCode(params.get("code") ?? "");
   const [joinedCode, setJoinedCode] = useState<string | null>(null);
+  // This screen made the room and shows its code ("tv=1" in the URL survives reloads).
+  const [hosting, setHosting] = useState(params.get("tv") === "1");
   const [state, setState] = useState<PeerState>("waiting");
   const [pairInfo, setPairInfo] = useState<string | null>(null);
   const [videoInfo, setVideoInfo] = useState<string | null>(null);
@@ -36,13 +41,15 @@ export function View() {
   }, [volume]);
 
   useEffect(() => {
-    if (isValidCode(initialCode)) join(initialCode);
+    if (isValidCode(initialCode)) join(initialCode, hosting);
     return () => leave();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  function join(code: string) {
+  function join(code: string, showCode = false) {
     leave();
-    history.replaceState(null, "", `/view?code=${code}`);
+    history.replaceState(null, "", `/view?code=${code}${showCode ? "&tv=1" : ""}`);
+    setHosting(showCode);
+    if (showCode) log(`showing code ${code} for the computer to enter`);
 
     const receiver = new Receiver(code, {
       log,
@@ -121,6 +128,12 @@ export function View() {
     saveVolume(percent);
   }
 
+  const showTvCode =
+    joinedCode !== null && hosting && !hasVideo && (state === "waiting" || state === "connecting" || state === "reconnecting");
+  // Keep a TV/monitor from dimming or starting its screensaver while there's a picture
+  // (or a code to read).
+  useWakeLock(hasVideo || showTvCode, log);
+
   const stats = [
     { label: "Path", value: pairInfo },
     { label: "Video", value: videoInfo },
@@ -134,8 +147,14 @@ export function View() {
           <div className="hero-icon"><Icon name="eye" size={28} /></div>
           <h1>Watch a screen</h1>
           <p className="lede">Enter the code shown on the sharing device.</p>
-          <CodeEntry initial={initialCode} action="Watch" onSubmit={join} />
+          <CodeEntry initial={initialCode} action="Watch" onSubmit={(code) => join(code)} autoFocus={hasFinePointer()} />
         </section>
+        <div className="or-divider" role="separator"><span>or, on a TV</span></div>
+        <button className="choice tv-choice" onClick={() => join(generateCode(), true)} autoFocus={!hasFinePointer()}>
+          <span className="choice-icon"><Icon name="tv" size={26} /></span>
+          <span className="choice-title">Show a code on this screen</span>
+          <span className="choice-body">No typing with the remote: enter the code on the computer instead.</span>
+        </button>
       </Shell>
     );
   }
@@ -157,6 +176,8 @@ export function View() {
         </div>
       </div>
 
+      {/* While the code shows, CSS hides the player that follows it (it stays mounted to receive the stream). */}
+      {showTvCode && <TvCode code={joinedCode} connecting={state === "connecting"} />}
       <Player
         ref={videoRef}
         state={state}
@@ -178,11 +199,16 @@ export function View() {
           entire screen or a browser tab with "Share audio" ticked.
         </p>
       )}
-      {hasVideo && <p className="hint subtle desktop-only">Shortcuts: M mute · F fullscreen · ↑ ↓ volume · double-click for fullscreen</p>}
+      {hasVideo && <p className="hint subtle desktop-only">Shortcuts: M mute · F fullscreen · ↑ ↓ volume · + − zoom · 0 fit · double-click for fullscreen</p>}
 
       <Details stats={stats} lines={lines} />
     </Shell>
   );
+}
+
+// Mouse/trackpad: type the code right away. TVs and phones: don't pop up a keyboard.
+function hasFinePointer(): boolean {
+  return window.matchMedia?.("(pointer: fine)").matches ?? true;
 }
 
 const VOLUME_KEY = "argus.viewerVolume";

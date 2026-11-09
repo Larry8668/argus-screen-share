@@ -9,24 +9,35 @@ import { RoomCard } from "../components/RoomCard";
 import { LevelMeter } from "../components/LevelMeter";
 import { Details } from "../components/Details";
 import { Icon } from "../components/Icon";
+import { CodeEntry } from "../components/CodeEntry";
+import { ShareSettings } from "../components/ShareSettings";
+import { readQuality, saveQuality, type Quality } from "../lib/bitrate";
+import { useAutoTune } from "../lib/useAutoTune";
+import { useDataSaver } from "../lib/useDataSaver";
 
 type Phase = "idle" | "sharing";
 
 // The room code lives in the URL (/share?code=…), so reloading this page keeps the same
 // room and a waiting viewer reconnects by itself once sharing starts again.
-function codeFromUrl(): { code: string; resumed: boolean } {
-  const fromUrl = normalizeCode(new URLSearchParams(location.search).get("code") ?? "");
-  return isValidCode(fromUrl) ? { code: fromUrl, resumed: true } : { code: generateCode(), resumed: false };
+// "tv=1": the code came from a TV showing it (see View), not from an earlier share.
+function codeFromUrl(): { code: string; resumed: boolean; fromTv: boolean } {
+  const params = new URLSearchParams(location.search);
+  const fromUrl = normalizeCode(params.get("code") ?? "");
+  return isValidCode(fromUrl)
+    ? { code: fromUrl, resumed: true, fromTv: params.get("tv") === "1" }
+    : { code: generateCode(), resumed: false, fromTv: false };
 }
 
 export function Share() {
-  const [{ code, resumed }] = useState(codeFromUrl);
+  const [{ code, resumed, fromTv }] = useState(codeFromUrl);
   const [phase, setPhase] = useState<Phase>("idle");
   const [state, setState] = useState<PeerState | "idle">("idle");
   const [pairInfo, setPairInfo] = useState<string | null>(null);
   const [videoInfo, setVideoInfo] = useState<string | null>(null);
   const [audioInfo, setAudioInfo] = useState<string | null>(null);
   const [tuning, setTuning] = useState<Tuning>("text");
+  const [autoTune, setAutoTune] = useState(true);
+  const [quality, setQuality] = useState<Quality>(readQuality);
   const [source, setSource] = useState<Source>("screen");
   const [captured, setCaptured] = useState<MediaStream | null>(null);
   const [lines, log] = useLog();
@@ -106,6 +117,27 @@ export function Share() {
     setPhase("sharing");
   }
 
+  useAutoTune(phase === "sharing" && source === "screen" && autoTune, videoInfo, tuning, (next, why) => {
+    log(`auto: ${why}, switching to ${next === "motion" ? "Video" : "Text"}`);
+    void changeTuning(next);
+  });
+  useDataSaver(senderRef, state === "connected", quality, log);
+
+  function chooseQuality(next: Quality) {
+    setQuality(next);
+    saveQuality(next);
+  }
+
+  function chooseTuning(next: Tuning) {
+    setAutoTune(false);
+    void changeTuning(next);
+  }
+
+  function chooseAuto() {
+    setAutoTune(true);
+    log("auto tuning on: Text, switching to Video while the link is slow");
+  }
+
   async function changeTuning(next: Tuning) {
     const track = streamRef.current?.getVideoTracks()[0];
     if (!track) return;
@@ -145,7 +177,11 @@ export function Share() {
         <section className="hero compact">
           <h1>Share your screen</h1>
           <p className="lede">
-            {resumed ? (
+            {fromTv ? (
+              <>
+                Pairing with the screen showing <span className="code-inline">{code}</span>. Pick what to share.
+              </>
+            ) : resumed ? (
               <>
                 Resume sharing in room <span className="code-inline">{code}</span>. A viewer who's still waiting reconnects
                 automatically.
@@ -171,6 +207,14 @@ export function Share() {
             </span>
           </button>
         </div>
+        {!resumed && (
+          <details className="tv-entry">
+            <summary>
+              <Icon name="tv" size={18} /> Have a code from a TV? Enter it
+            </summary>
+            <CodeEntry action="Use code" onSubmit={(c) => location.assign(`/share?code=${c}&tv=1`)} />
+          </details>
+        )}
         {lines.length > 0 && <Details lines={lines} />}
       </Shell>
     );
@@ -188,17 +232,15 @@ export function Share() {
             <span className="preview-label">Preview · only you see this</span>
           </div>
           <div className="toolbar">
-            {source === "screen" && (
-              <div className="segmented" role="group" aria-label="Optimize for">
-                <span className="segmented-label">Optimize for</span>
-                <button className={tuning === "text" ? "active" : ""} onClick={() => void changeTuning("text")} title="Sharp text, fps drops on slow links">
-                  Text
-                </button>
-                <button className={tuning === "motion" ? "active" : ""} onClick={() => void changeTuning("motion")} title="Smooth motion, resolution drops on slow links">
-                  Video
-                </button>
-              </div>
-            )}
+            <ShareSettings
+              showTuning={source === "screen"}
+              auto={autoTune}
+              tuning={tuning}
+              onAuto={chooseAuto}
+              onTuning={chooseTuning}
+              quality={quality}
+              onQuality={chooseQuality}
+            />
             <button className="btn btn-danger" onClick={stop}>
               <Icon name="stop" size={16} /> Stop sharing
             </button>

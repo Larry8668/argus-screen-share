@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useRef, useState, type ReactNode } from "react";
 import type { PeerState } from "../lib/session";
 import { Icon } from "./Icon";
+import { useZoomPan } from "./useZoomPan";
 
 interface PlayerProps {
   state: PeerState;
@@ -18,12 +19,16 @@ interface PlayerProps {
 
 const HIDE_AFTER_MS = 2800;
 const VOLUME_STEP = 10;
+const ZOOM_STEP = 1.25;
+const FIT_KEY = "argus.viewerFit";
+type Fit = "contain" | "cover";
 
 /**
  * Viewer video player: overlay states (waiting / reconnecting / failed + Retry), a
  * "tap to unmute" prompt, and auto-hiding controls (mute, 0–300% volume, stats,
- * picture-in-picture, fullscreen). Fullscreen targets the wrapper so the controls stay
- * usable. Keyboard and TV remotes: M mute, F fullscreen, ↑/↓ volume, Enter on buttons.
+ * picture-in-picture, fit/fill, zoom, fullscreen). Fullscreen targets the wrapper so the
+ * controls stay usable. Keyboard and TV remotes: M mute, F fullscreen, ↑/↓ volume,
+ * +/- zoom, 0 reset zoom, Enter on buttons. Double-click: fullscreen, or reset when zoomed.
  */
 export const Player = forwardRef<HTMLVideoElement, PlayerProps>(function Player(props, videoRef) {
   const { state, hasVideo, hasAudio, muted, volume, onToggleMute, onVolume, onRetry, stats, log } = props;
@@ -32,6 +37,21 @@ export const Player = forwardRef<HTMLVideoElement, PlayerProps>(function Player(
   const [idle, setIdle] = useState(false);
   const [isFull, setIsFull] = useState(false);
   const [showStats, setShowStats] = useState(false);
+  const [fit, setFit] = useState<Fit>(readFit);
+  const zp = useZoomPan(wrapRef, { wheelAlwaysZooms: isFull, onChange: wake });
+  const { reset: resetZoom } = zp;
+
+  // A new call starts unzoomed.
+  useEffect(() => {
+    if (!hasVideo) resetZoom();
+  }, [hasVideo]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function toggleFit() {
+    const next: Fit = fit === "contain" ? "cover" : "contain";
+    setFit(next);
+    saveFit(next);
+    log(next === "cover" ? "fill: cropping the picture to fill the player" : "fit: showing the whole picture");
+  }
 
   const video = () => (typeof videoRef === "function" ? null : videoRef?.current ?? null);
 
@@ -69,9 +89,9 @@ export const Player = forwardRef<HTMLVideoElement, PlayerProps>(function Player(
   }
 
   // Shortcuts work anywhere on the page unless the user is typing.
-  const latest = useRef({ hasAudio, hasVideo, volume, onToggleMute, onVolume, toggleFullscreen });
+  const latest = useRef({ hasAudio, hasVideo, volume, onToggleMute, onVolume, toggleFullscreen, zp });
   useEffect(() => {
-    latest.current = { hasAudio, hasVideo, volume, onToggleMute, onVolume, toggleFullscreen };
+    latest.current = { hasAudio, hasVideo, volume, onToggleMute, onVolume, toggleFullscreen, zp };
   });
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -87,7 +107,10 @@ export const Player = forwardRef<HTMLVideoElement, PlayerProps>(function Player(
       } else if (e.key === "ArrowDown" && l.hasAudio && t.getAttribute("type") !== "range") {
         e.preventDefault();
         l.onVolume(Math.max(0, l.volume - VOLUME_STEP));
-      } else return;
+      } else if ((e.key === "+" || e.key === "=") && l.hasVideo) l.zp.zoomBy(ZOOM_STEP);
+      else if ((e.key === "-" || e.key === "_") && l.hasVideo) l.zp.zoomBy(1 / ZOOM_STEP);
+      else if (e.key === "0" && l.hasVideo) l.zp.reset();
+      else return;
       wake();
     };
     window.addEventListener("keydown", onKey);
@@ -104,9 +127,23 @@ export const Player = forwardRef<HTMLVideoElement, PlayerProps>(function Player(
       onMouseMove={wake}
       onTouchStart={wake}
       onFocus={wake}
-      onDoubleClick={() => hasVideo && toggleFullscreen()}
+      onPointerDown={zp.handlers.onPointerDown}
+      onPointerMove={zp.handlers.onPointerMove}
+      onPointerUp={zp.handlers.onPointerUp}
+      onPointerCancel={zp.handlers.onPointerUp}
+      onDoubleClick={(e) => {
+        if (!hasVideo || !(e.target instanceof HTMLVideoElement) || zp.lastWasTouch()) return; // touch double-tap zooms instead
+        if (zp.zoomed) zp.reset();
+        else toggleFullscreen();
+      }}
     >
-      <video ref={videoRef} autoPlay muted playsInline />
+      <video ref={videoRef} autoPlay muted playsInline className={`fit-${fit}`} style={zp.style} />
+
+      {hasVideo && zp.zoomed && (
+        <button className="zoom-chip" onClick={zp.reset} title="Back to the whole picture (0)">
+          {Math.round(zp.zoom.scale * 100)}% · Reset
+        </button>
+      )}
 
       {!hasVideo && <StateOverlay state={state} onRetry={onRetry} />}
 
@@ -167,6 +204,21 @@ export const Player = forwardRef<HTMLVideoElement, PlayerProps>(function Player(
             )}
           </div>
           <div className="controls-right">
+            <span className="zoom-btns">
+              <IconButton label="Zoom out (−)" onClick={() => zp.zoomBy(1 / ZOOM_STEP)} disabled={!zp.zoomed}>
+                <Icon name="zoomOut" />
+              </IconButton>
+              <IconButton label="Zoom in (+)" onClick={() => zp.zoomBy(ZOOM_STEP)}>
+                <Icon name="zoomIn" />
+              </IconButton>
+            </span>
+            <IconButton
+              label={fit === "contain" ? "Fill the player (crops edges)" : "Fit the whole picture"}
+              onClick={toggleFit}
+              active={fit === "cover"}
+            >
+              <Icon name={fit === "contain" ? "fill" : "fit"} />
+            </IconButton>
             <IconButton label="Stats" onClick={() => setShowStats((v) => !v)} active={showStats}>
               <Icon name="chart" />
             </IconButton>
@@ -248,4 +300,20 @@ function IconButton({
       {children}
     </button>
   );
+}
+
+function readFit(): Fit {
+  try {
+    return localStorage.getItem(FIT_KEY) === "cover" ? "cover" : "contain";
+  } catch {
+    return "contain";
+  }
+}
+
+function saveFit(fit: Fit): void {
+  try {
+    localStorage.setItem(FIT_KEY, fit);
+  } catch {
+    // Storage blocked; the choice just won't be remembered.
+  }
 }
