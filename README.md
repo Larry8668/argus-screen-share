@@ -93,8 +93,7 @@ web/
 └── wrangler.jsonc      Worker, assets, Durable Object binding + migration
 ```
 
-`client/` and `server/` are the previous FFmpeg + HLS + localtunnel version. Kept for
-reference; not deployed.
+The previous FFmpeg + HLS + localtunnel version lives in git history (before `f7aefeb`).
 
 ## License
 
