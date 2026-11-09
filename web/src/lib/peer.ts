@@ -212,20 +212,27 @@ export async function describePairs(pc: RTCPeerConnection): Promise<string[]> {
 }
 
 /**
- * Audio flow summary. Sender: packets sent. Receiver: packets received and the current
- * level (0 = silence), which tells "nothing arriving" apart from "arriving but silent".
+ * Audio flow summary, both directions when a section carries both (talk-over voice):
+ * "in N packets · level x | out N packets · level y". Level 0 = silence, which tells
+ * "nothing arriving" apart from "arriving but silent"; the outgoing level comes from the
+ * captured source, so a silent Stereo Mix shows up as level 0.00 on the sharer.
  * `pick` filters by media section (mid), to keep talk-over voice apart from screen audio.
  */
 export async function describeAudio(pc: RTCPeerConnection, pick: (mid: string | undefined) => boolean = () => true): Promise<string | null> {
   const stats = await pc.getStats();
-  let summary: string | null = null;
-  stats.forEach((report) => {
-    const r = report as { type: string; kind?: string; mid?: string; packetsSent?: number; packetsReceived?: number; audioLevel?: number };
-    if (r.kind !== "audio" || !pick(r.mid)) return;
-    if (r.type === "outbound-rtp") summary = `sending · ${r.packetsSent ?? 0} packets`;
-    if (r.type === "inbound-rtp") {
-      summary = `receiving · ${r.packetsReceived ?? 0} packets · level ${(r.audioLevel ?? 0).toFixed(2)}`;
+  type R = { type: string; id: string; kind?: string; mid?: string; packetsSent?: number; packetsReceived?: number; audioLevel?: number; mediaSourceId?: string };
+  const byId = new Map<string, R>();
+  stats.forEach((report) => byId.set((report as R).id, report as R));
+  let incoming: string | null = null;
+  let outgoing: string | null = null;
+  const level = (v: number | undefined) => (v === undefined ? "" : ` · level ${v.toFixed(2)}`);
+  for (const r of byId.values()) {
+    if (r.kind !== "audio" || !pick(r.mid)) continue;
+    if (r.type === "inbound-rtp") incoming = `in ${r.packetsReceived ?? 0} packets${level(r.audioLevel ?? 0)}`;
+    if (r.type === "outbound-rtp") {
+      const source = r.mediaSourceId ? byId.get(r.mediaSourceId) : undefined;
+      outgoing = `out ${r.packetsSent ?? 0} packets${level(source?.audioLevel)}`;
     }
-  });
-  return summary;
+  }
+  return [incoming, outgoing].filter(Boolean).join(" | ") || null;
 }

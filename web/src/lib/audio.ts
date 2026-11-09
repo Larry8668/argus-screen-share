@@ -123,3 +123,26 @@ export function createBooster(track: MediaStreamTrack, gain: number): Booster {
     },
   };
 }
+
+/**
+ * Loudest sample (0..1) on a track over `ms`. Firefox's WebRTC stats don't report the
+ * outgoing level, so this is how a report shows whether a sound input was silent.
+ */
+export async function measurePeak(track: MediaStreamTrack, ms = 2000): Promise<number> {
+  const ctx = new AudioContext();
+  try {
+    await ctx.resume().catch(() => {});
+    const analyser = ctx.createAnalyser();
+    ctx.createMediaStreamSource(new MediaStream([track])).connect(analyser);
+    const buf = new Float32Array(analyser.fftSize);
+    let peak = 0;
+    for (let t = 0; t < ms; t += 100) {
+      await new Promise((r) => setTimeout(r, 100));
+      analyser.getFloatTimeDomainData(buf);
+      for (const v of buf) peak = Math.max(peak, Math.abs(v));
+    }
+    return peak;
+  } finally {
+    void ctx.close();
+  }
+}

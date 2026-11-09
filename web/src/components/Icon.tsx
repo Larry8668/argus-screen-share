@@ -26,6 +26,7 @@ const PATHS = {
   zoomOut: "M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM21 21l-5-5M8 11h6",
   fit: "M3 5h18v14H3zM8 9l-2 3 2 3M16 9l2 3-2 3",
   fill: "M3 5h18v14H3zM7 9V7h3M17 9V7h-3M7 15v2h3M17 15v2h-3",
+  rotate: "M4 5h8v14H4zM15 6a6 6 0 0 1 5 6M20 12l-2.6-1.2M20 12l1.2-2.6",
   tv: "M3 6h18v12H3zM8 21h8M9 2l3 3 3-3",
 } as const;
 

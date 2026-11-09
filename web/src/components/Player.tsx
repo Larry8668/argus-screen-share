@@ -75,11 +75,32 @@ export const Player = forwardRef<HTMLVideoElement, PlayerProps>(function Player(
     };
   }, []);
 
-  function toggleFullscreen() {
+  async function enterFullscreen(): Promise<boolean> {
     const wrap = wrapRef.current;
-    if (!wrap) return;
-    if (document.fullscreenElement) void document.exitFullscreen();
-    else wrap.requestFullscreen?.().catch((err: Error) => log(`fullscreen refused: ${err.message}`));
+    if (!wrap?.requestFullscreen) return false;
+    try {
+      await wrap.requestFullscreen();
+      return true;
+    } catch (err) {
+      log(`fullscreen refused: ${(err as Error).message}`);
+      return false;
+    }
+  }
+
+  async function toggleFullscreen() {
+    if (document.fullscreenElement) return void document.exitFullscreen();
+    // Phones: turn to match the picture (a landscape screen share fills the phone sideways).
+    if ((await enterFullscreen()) && canRotate()) {
+      const v = video();
+      await lockOrientation(v && v.videoHeight > v.videoWidth ? "portrait" : "landscape", log);
+    }
+  }
+
+  // Flip between landscape and portrait; the browser only allows this in fullscreen.
+  async function rotate() {
+    if (!document.fullscreenElement && !(await enterFullscreen())) return;
+    const now = screen.orientation?.type ?? "portrait-primary";
+    await lockOrientation(now.startsWith("landscape") ? "portrait" : "landscape", log);
   }
 
   async function togglePip() {
@@ -105,7 +126,7 @@ export const Player = forwardRef<HTMLVideoElement, PlayerProps>(function Player(
       const l = latest.current;
       const key = e.key.toLowerCase();
       if (key === "m" && l.hasAudio) l.onToggleMute();
-      else if (key === "f" && l.hasVideo) l.toggleFullscreen();
+      else if (key === "f" && l.hasVideo) void l.toggleFullscreen();
       else if (e.key === "ArrowUp" && l.hasAudio && t.getAttribute("type") !== "range") {
         e.preventDefault();
         l.onVolume(Math.min(300, l.volume + VOLUME_STEP));
@@ -139,7 +160,7 @@ export const Player = forwardRef<HTMLVideoElement, PlayerProps>(function Player(
       onDoubleClick={(e) => {
         if (!hasVideo || !(e.target instanceof HTMLVideoElement) || zp.lastWasTouch()) return; // touch double-tap zooms instead
         if (zp.zoomed) zp.reset();
-        else toggleFullscreen();
+        else void toggleFullscreen();
       }}
     >
       <video ref={videoRef} autoPlay muted playsInline className={`fit-${fit}`} style={zp.style} />
@@ -237,7 +258,12 @@ export const Player = forwardRef<HTMLVideoElement, PlayerProps>(function Player(
                 <Icon name="pip" />
               </IconButton>
             )}
-            <IconButton label={isFull ? "Exit fullscreen (F)" : "Fullscreen (F)"} onClick={toggleFullscreen}>
+            {canRotate() && (
+              <IconButton label="Rotate (landscape / portrait)" onClick={() => void rotate()}>
+                <Icon name="rotate" />
+              </IconButton>
+            )}
+            <IconButton label={isFull ? "Exit fullscreen (F)" : "Fullscreen (F)"} onClick={() => void toggleFullscreen()}>
               <Icon name={isFull ? "shrink" : "expand"} />
             </IconButton>
           </div>
@@ -325,5 +351,26 @@ function saveFit(fit: Fit): void {
     localStorage.setItem(FIT_KEY, fit);
   } catch {
     // Storage blocked; the choice just won't be remembered.
+  }
+}
+
+type OrientationLock = "landscape" | "portrait";
+
+/**
+ * Orientation lock works on Android browsers in fullscreen. iPhones don't support it
+ * (their fullscreen video follows the phone's own rotation), so the button is hidden
+ * there and on desktops.
+ */
+function canRotate(): boolean {
+  const o = screen.orientation as (ScreenOrientation & { lock?: unknown }) | undefined;
+  return typeof o?.lock === "function" && window.matchMedia?.("(pointer: coarse)").matches === true;
+}
+
+async function lockOrientation(to: OrientationLock, log: (line: string) => void): Promise<void> {
+  try {
+    await (screen.orientation as ScreenOrientation & { lock: (o: OrientationLock) => Promise<void> }).lock(to);
+    log(`rotated to ${to}`);
+  } catch (err) {
+    log(`rotation refused: ${(err as Error).name}: ${(err as Error).message}`);
   }
 }

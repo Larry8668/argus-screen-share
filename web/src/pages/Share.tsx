@@ -11,6 +11,7 @@ import { Details } from "../components/Details";
 import { Icon } from "../components/Icon";
 import { CodeEntry } from "../components/CodeEntry";
 import { ShareSettings } from "../components/ShareSettings";
+import { measurePeak } from "../lib/audio";
 import { readQuality, saveQuality, type Quality } from "../lib/bitrate";
 import { useAutoTune } from "../lib/useAutoTune";
 import { useDataSaver } from "../lib/useDataSaver";
@@ -197,6 +198,13 @@ export function Share() {
       void removeInput();
     };
     log(`sound from input: ${track.label || device.label}`);
+    void measurePeak(track).then((peak) =>
+      log(
+        peak < 0.001
+          ? "sound input: silent for 2s. Play something; if still silent, this input isn't getting the computer's sound (Stereo Mix only hears the device set as Windows output)"
+          : `sound input: level ${peak.toFixed(2)}, sound is flowing`,
+      ),
+    );
     setInputLabel(track.label || device.label || "sound input");
     setCaptured(new MediaStream(stream.getTracks()));
     await senderRef.current.replaceSource(stream);
