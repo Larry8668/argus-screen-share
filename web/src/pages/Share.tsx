@@ -9,6 +9,13 @@ import { RoomCard } from "../components/RoomCard";
 import { LevelMeter } from "../components/LevelMeter";
 import { Details } from "../components/Details";
 import { Icon } from "../components/Icon";
+import { ViewerList } from "../components/ViewerList";
+import { PrivacyToggle } from "../components/PrivacyToggle";
+import { VoiceControls } from "../components/VoiceControls";
+import { useVoiceChat } from "../lib/useVoiceChat";
+import { restrictOwnAudioSupported } from "../lib/voice";
+import { readPrivate, savePrivate } from "../lib/prefs";
+import type { ViewerInfo } from "../lib/session";
 
 type Phase = "idle" | "sharing";
 
@@ -30,6 +37,9 @@ export function Share() {
   const [source, setSource] = useState<Source>("screen");
   const [captured, setCaptured] = useState<MediaStream | null>(null);
   const [lines, log] = useLog();
+  const [viewers, setViewers] = useState<ViewerInfo[]>([]);
+  const [privateRoom, setPrivateRoom] = useState(readPrivate);
+  const voice = useVoiceChat(log);
 
   const previewRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -79,6 +89,12 @@ export function Share() {
       log(`audio: yes (${audio.label || "system/tab audio"})${audio.muted ? ", but no sound frames yet" : ""}`);
       audio.onmute = () => log("audio capture: no sound frames (on macOS: check System Settings → Privacy → Screen & System Audio Recording)");
       audio.onunmute = () => log("audio capture: sound frames flowing");
+      const restricted = (audio.getSettings() as MediaTrackSettings & { restrictOwnAudio?: boolean }).restrictOwnAudio;
+      log(
+        restricted
+          ? "audio: restrictOwnAudio on, viewers' voices played here stay out of the shared sound"
+          : "audio: this browser can't keep viewers' voices out of the shared sound; use headphones if you talk",
+      );
     } else if (chosen === "screen") {
       // displaySurface: "monitor" | "window" | "browser" (tab). Windows never carry audio.
       const surface = (settings as MediaTrackSettings & { displaySurface?: string }).displaySurface;
@@ -98,8 +114,13 @@ export function Share() {
       onPath: setPairInfo,
       onVideo: setVideoInfo,
       onAudio: setAudioInfo,
-    });
+      onViewers: setViewers,
+      onVoiceTrack: voice.onVoiceTrack,
+    }, { voice: true, private: privateRoom });
     await sender.setDegradation(degradation);
+    voice.bind(sender);
+    // Starting the share was a click, so viewers' voices may play from now on.
+    voice.unlock();
     sender.start();
     senderRef.current = sender;
 
@@ -120,7 +141,15 @@ export function Share() {
     }
   }
 
+  function changePrivate(on: boolean) {
+    setPrivateRoom(on);
+    savePrivate(on);
+    senderRef.current?.setPrivate(on);
+  }
+
   function stop() {
+    voice.bind(null);
+    setViewers([]);
     senderRef.current?.stop();
     senderRef.current = null;
     setCaptured(null);
@@ -135,6 +164,13 @@ export function Share() {
     { label: "Path", value: pairInfo },
     { label: "Video", value: videoInfo },
     { label: "Audio", value: audioInfo },
+    ...(viewers.length > 1 ? [{ label: "Viewers", value: `${viewers.filter((v) => v.status === "connected").length} watching` }] : []),
+    ...(viewers.length > 1
+      ? viewers.map((v) => ({
+          label: v.name || `Viewer ${v.peer.slice(0, 6)}`,
+          value: [v.path, v.video, v.voice && `voice ${v.voice}`].filter(Boolean).join(" · ") || v.status,
+        }))
+      : []),
   ];
 
   if (phase === "idle") {
@@ -171,13 +207,13 @@ export function Share() {
             </span>
           </button>
         </div>
+        <div className="choices-extra">
+          <PrivacyToggle on={privateRoom} onChange={changePrivate} />
+        </div>
         {lines.length > 0 && <Details lines={lines} />}
       </Shell>
     );
   }
-
-  const viewerText =
-    state === "connected" ? "Viewer connected" : state === "waiting" ? "No one watching yet" : stateText(state as PeerState, "a viewer");
 
   return (
     <Shell status={stateText(state as PeerState, "a viewer")} tone={toneOf(state)}>
@@ -207,16 +243,24 @@ export function Share() {
 
         <aside className="share-side">
           <RoomCard code={code} link={viewerUrl} linkLabel="Viewer link" log={log}>
-            <div className={`viewer-state tone-${toneOf(state)}`}>
-              <span className="dot" aria-hidden />
-              <span>{viewerText}</span>
-              {state === "failed" && (
-                <button className="btn btn-ghost small" onClick={() => senderRef.current?.retry()}>
-                  <Icon name="refresh" size={14} /> Retry
-                </button>
-              )}
-            </div>
+            <ViewerList
+              state={state}
+              viewers={viewers}
+              onAdmit={(peer) => void senderRef.current?.admit(peer)}
+              onDeny={(peer) => senderRef.current?.deny(peer)}
+              onRetry={() => senderRef.current?.retry()}
+            />
+            <PrivacyToggle on={privateRoom} onChange={changePrivate} />
           </RoomCard>
+
+          <section className="card stack">
+            <div className="eyebrow">Talk</div>
+            <VoiceControls voice={voice} who="viewers" />
+            {!restrictOwnAudioSupported() && hasSound && (
+              <p className="hint subtle">Wear headphones if you talk: this browser would send viewers' voices back to them inside the shared sound.</p>
+            )}
+            <p className="hint subtle">You hear every viewer; viewers hear you, not each other.</p>
+          </section>
 
           <section className="card">
             <div className="eyebrow">Sound</div>

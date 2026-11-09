@@ -14,6 +14,11 @@ interface PlayerProps {
   /** Stats shown in the in-player overlay (the "chart" button). */
   stats: { label: string; value: string | null }[];
   log: (line: string) => void;
+  /** Replaces the built-in waiting/failed overlay while there's no picture (e.g. admission screens). */
+  overlay?: ReactNode;
+  /** Talk-over mic toggle; the button shows only when this is given. */
+  micOn?: boolean;
+  onToggleMic?: () => void;
 }
 
 const HIDE_AFTER_MS = 2800;
@@ -26,7 +31,7 @@ const VOLUME_STEP = 10;
  * usable. Keyboard and TV remotes: M mute, F fullscreen, ↑/↓ volume, Enter on buttons.
  */
 export const Player = forwardRef<HTMLVideoElement, PlayerProps>(function Player(props, videoRef) {
-  const { state, hasVideo, hasAudio, muted, volume, onToggleMute, onVolume, onRetry, stats, log } = props;
+  const { state, hasVideo, hasAudio, muted, volume, onToggleMute, onVolume, onRetry, stats, log, overlay, micOn, onToggleMic } = props;
   const wrapRef = useRef<HTMLDivElement>(null);
   const hideTimer = useRef<number | undefined>(undefined);
   const [idle, setIdle] = useState(false);
@@ -108,7 +113,7 @@ export const Player = forwardRef<HTMLVideoElement, PlayerProps>(function Player(
     >
       <video ref={videoRef} autoPlay muted playsInline />
 
-      {!hasVideo && <StateOverlay state={state} onRetry={onRetry} />}
+      {!hasVideo && (overlay ?? <StateOverlay state={state} onRetry={onRetry} />)}
 
       {hasVideo && hasAudio && muted && (
         <button className="unmute-prompt" onClick={onToggleMute}>
@@ -165,6 +170,11 @@ export const Player = forwardRef<HTMLVideoElement, PlayerProps>(function Player(
                 </span>
               </label>
             )}
+            {onToggleMic && (
+              <IconButton label={micOn ? "Mic on: tap to stop talking" : "Talk to the sharer (mic)"} onClick={onToggleMic} active={micOn}>
+                <Icon name={micOn ? "mic" : "micOff"} />
+              </IconButton>
+            )}
           </div>
           <div className="controls-right">
             <IconButton label="Stats" onClick={() => setShowStats((v) => !v)} active={showStats}>
@@ -201,9 +211,9 @@ function StateOverlay({ state, onRetry }: { state: PeerState; onRetry: () => voi
     return (
       <div className="overlay">
         <div className="overlay-title">Opened somewhere else</div>
-        <p>This room is being watched in another tab or device. Only one viewer at a time.</p>
+        <p>A copy of this tab took over its place in the room.</p>
         <button className="btn btn-primary" onClick={onRetry}>
-          <Icon name="refresh" size={16} /> Watch here instead
+          <Icon name="refresh" size={16} /> Watch here too
         </button>
       </div>
     );
