@@ -10,7 +10,7 @@
 
 import { Call, type CallOptions, type CallState } from "./call";
 import { isFirefox } from "./capture";
-import { loadIceServers, preferH264, type Logger } from "./peer";
+import { loadIceServers, preferH264, webrtcAvailable, type Logger } from "./peer";
 import { Signaling, type Role, type SignalMessage } from "./signaling";
 
 /**
@@ -125,6 +125,11 @@ abstract class Session {
 
   start(): void {
     if (this.active) return;
+    if (!webrtcAvailable()) {
+      this.log("WebRTC is switched off in this browser (RTCPeerConnection missing); can't connect");
+      this.setState("failed");
+      return;
+    }
     this.active = true;
     window.addEventListener("pagehide", this.onPageHide);
     this.setState("waiting");

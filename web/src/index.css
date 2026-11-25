@@ -419,3 +419,5 @@ select.input { cursor: pointer; }
   .hero { padding-top: 1.75rem; }
   .code span { font-size: 1.35rem; }
 }
+.warn-box.webrtc-off { margin-bottom: 1rem; align-items: flex-start; line-height: 1.5; }
+.warn-box code { font-family: var(--mono); font-size: .85em; }

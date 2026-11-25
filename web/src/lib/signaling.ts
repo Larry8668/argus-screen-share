@@ -56,6 +56,9 @@ const FULL = 4001;
 export class Signaling {
   private ws: WebSocket | null = null;
   private pingTimer: number | undefined;
+  // A ping sent and nothing heard since. Still set at the next ping = the link is dead
+  // (laptop slept, Wi-Fi changed) even though the browser still calls the socket open.
+  private awaitingPong = false;
   private retryTimer: number | undefined;
   private attempt = 0;
   private stopped = false;
@@ -99,11 +102,16 @@ export class Signaling {
       this.attempt = 0;
       this.everOpened = true;
       this.onStatus("open");
+      this.awaitingPong = false;
       this.pingTimer = window.setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) ws.send("ping");
+        if (ws.readyState !== WebSocket.OPEN) return;
+        if (this.awaitingPong) return this.dropDead(ws);
+        this.awaitingPong = true;
+        ws.send("ping");
       }, PING_INTERVAL_MS);
     };
     ws.onmessage = (event) => {
+      this.awaitingPong = false;
       if (event.data === "pong") return;
       try {
         this.onMessage(JSON.parse(event.data) as SignalMessage);
@@ -124,13 +132,27 @@ export class Signaling {
         this.stopped = true;
         return this.onStatus("full", detail);
       }
-      const delay = RETRY_DELAYS_MS[Math.min(this.attempt++, RETRY_DELAYS_MS.length - 1)];
-      this.onStatus("reconnecting", `${detail}; retry in ${delay / 1000}s`);
-      this.retryTimer = window.setTimeout(() => this.open(), delay);
+      this.scheduleRetry(detail);
     };
     ws.onerror = () => {
       // onclose follows with the code; nothing useful is exposed here.
     };
+  }
+
+  private scheduleRetry(detail: string): void {
+    const delay = RETRY_DELAYS_MS[Math.min(this.attempt++, RETRY_DELAYS_MS.length - 1)];
+    this.onStatus("reconnecting", `${detail}; retry in ${delay / 1000}s`);
+    this.retryTimer = window.setTimeout(() => this.open(), delay);
+  }
+
+  // A half-open socket can take minutes to report its close, so cut it loose now and
+  // reconnect; the relay swaps the new socket in for the old one.
+  private dropDead(ws: WebSocket): void {
+    window.clearInterval(this.pingTimer);
+    ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null;
+    ws.close();
+    if (this.ws === ws) this.ws = null;
+    this.scheduleRetry("no reply from the relay");
   }
 
   send(message: SignalMessage): void {

@@ -20,11 +20,16 @@ export type Role = "share" | "view";
 export const MAX_VIEWERS = 4;
 
 const ROLES: Role[] = ["share", "view"];
-type Attachment = { room: string; peer?: string; replaced?: boolean };
+type Attachment = { room: string; peer?: string; replaced?: boolean; joinedAt?: number };
 
 // Close codes the client acts on (src/lib/signaling.ts).
 const CLOSE_REPLACED = 4000;
 const CLOSE_FULL = 4001;
+const CLOSE_SILENT = 4002;
+
+// Clients ping every 25s (60s in a throttled background tab). A socket silent this long
+// is a dead link (sleeping laptop, dropped Wi-Fi) the runtime hasn't noticed yet.
+const SILENT_AFTER_MS = 120_000;
 
 const ACCEPTED_TYPES = new Set(["offer", "answer", "ice", "bye", "stats", "knock", "lobby", "admit", "deny", "source"]);
 const PEER_ID = /^[a-z0-9]{8,16}$/;
@@ -55,6 +60,7 @@ export class RoomDO extends DurableObject<Env> {
     // being rejected or taking a second slot. Mark the stale socket first: its close
     // event lands later (possibly after the newcomer's offer), and must not be
     // announced as "peer-left" or the other side drops the new call.
+    this.closeSilent(room);
     const peer = role === "view" ? (PEER_ID.test(askedPeer) ? askedPeer : newPeerId()) : undefined;
     const stale = role === "share" ? this.live("share") : this.live("view").filter((ws) => attachmentOf(ws).peer === peer);
 
@@ -70,7 +76,7 @@ export class RoomDO extends DurableObject<Env> {
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     this.ctx.acceptWebSocket(server, [role]);
-    server.serializeAttachment({ room, peer } satisfies Attachment);
+    server.serializeAttachment({ room, peer, joinedAt: Date.now() } satisfies Attachment);
 
     const other = otherRole(role);
     const peerPresent = this.live(other).length > 0;
@@ -153,6 +159,26 @@ export class RoomDO extends DurableObject<Env> {
   }
 
   /** Sockets for a role, minus ones already replaced by a reconnect. */
+  // Drop sockets that stopped pinging, so a newcomer isn't told "the sharer is here"
+  // about one that will never answer. Its peer-left goes out as for any departure.
+  private closeSilent(room: string): void {
+    const now = Date.now();
+    for (const ws of this.ctx.getWebSockets()) {
+      if (isReplaced(ws)) continue;
+      const last = this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() ?? attachmentOf(ws).joinedAt ?? now;
+      if (now - last < SILENT_AFTER_MS) continue;
+      const role = this.roleOf(ws);
+      log({ event: "silent", room, role, peer: attachmentOf(ws).peer, silentForS: Math.round((now - last) / 1000) });
+      try {
+        ws.close(CLOSE_SILENT, "no ping for 2 minutes");
+      } catch {
+        // Already closing.
+      }
+      ws.serializeAttachment({ ...attachmentOf(ws), replaced: true } satisfies Attachment);
+      if (role) this.broadcast(otherRole(role), { type: "peer-left", role, peer: attachmentOf(ws).peer });
+    }
+  }
+
   private live(role: Role): WebSocket[] {
     return this.ctx.getWebSockets(role).filter((ws) => !isReplaced(ws));
   }

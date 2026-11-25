@@ -29,11 +29,21 @@ export function createPeer(log: Logger, iceServers: RTCIceServer[]): RTCPeerConn
   const pc = new RTCPeerConnection({ iceServers });
 
   pc.oniceconnectionstatechange = () => log(`ice: ${pc.iceConnectionState}`);
-  pc.onicegatheringstatechange = () => log(`ice gathering: ${pc.iceGatheringState}`);
+  let localCount = 0;
+  pc.onicegatheringstatechange = () => {
+    log(`ice gathering: ${pc.iceGatheringState}`);
+    // Zero routes of our own: the browser is blocking WebRTC networking, usually a VPN or
+    // privacy add-on forcing "proxy only", or Firefox media.peerconnection.ice.* prefs.
+    if (pc.iceGatheringState === "complete" && localCount === 0) {
+      log("no network routes from this browser: a VPN/proxy or privacy add-on is blocking WebRTC (Firefox: check about:config media.peerconnection.ice.* for changed prefs)");
+    }
+  };
   pc.onsignalingstatechange = () => log(`signaling: ${pc.signalingState}`);
   // addEventListener, not on*, so the session's own onicecandidate handler stays free.
   pc.addEventListener("icecandidate", (event) => {
-    if (event.candidate?.candidate) log(`local candidate: ${describeCandidate(event.candidate.candidate)}`);
+    if (!event.candidate?.candidate) return;
+    localCount++;
+    log(`local candidate: ${describeCandidate(event.candidate.candidate)}`);
   });
   pc.addEventListener("icecandidateerror", (event) => {
     const e = event as RTCPeerConnectionIceErrorEvent;
@@ -235,4 +245,13 @@ export async function describeAudio(pc: RTCPeerConnection, pick: (mid: string | 
     }
   }
   return [incoming, outgoing].filter(Boolean).join(" | ") || null;
+}
+
+/**
+ * WebRTC can be switched off while screen capture still works: Firefox's
+ * media.peerconnection.enabled=false (privacy add-ons, hardened profiles, LibreWolf).
+ * Then nothing can connect, so every page that calls should say so up front.
+ */
+export function webrtcAvailable(): boolean {
+  return typeof window.RTCPeerConnection === "function";
 }

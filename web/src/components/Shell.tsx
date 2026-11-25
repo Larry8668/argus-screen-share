@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { Tone } from "../lib/tone";
+import { webrtcAvailable } from "../lib/peer";
 
 const NAV = [
   { href: "/share", label: "Share" },
@@ -26,7 +27,18 @@ export function Shell({ status, tone = "idle", children }: { status?: string; to
         </nav>
         {status && <StatusPill tone={tone}>{status}</StatusPill>}
       </header>
-      <main className="page">{children}</main>
+      <main className="page">
+        {here !== "" && here !== "/setup" && !webrtcAvailable() && (
+          <div className="warn-box webrtc-off" role="alert">
+            <span>
+              <strong>This browser has WebRTC switched off</strong>, so it can't connect to other devices.
+              In Firefox: open <code>about:config</code>, set <code>media.peerconnection.enabled</code> to <code>true</code>,
+              and check privacy add-ons that block WebRTC. Or use Chrome or Edge.
+            </span>
+          </div>
+        )}
+        {children}
+      </main>
     </div>
   );
 }
