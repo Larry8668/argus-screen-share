@@ -90,6 +90,29 @@
 Something off? Open **Connection details → Report a problem** on either side. It sends
 the connection log (never video, audio or IP addresses) and shows a report ID.
 
+**Stuck on "Couldn't connect" behind a VPN?**
+Turn off the VPN's WebRTC protection (often called *"Prevent WebRTC from revealing your
+IP"*) for Argus, or for as long as you share. Privacy add-ons like uBlock Origin have a similar
+setting.
+
+<details>
+<summary>Why this is needed, and is it safe?</summary>
+
+- **What the setting does.** It forces WebRTC to go only through the VPN's proxy, so
+  websites can't read your real IP address.
+- **Why that breaks Argus.** A proxy can only carry a call through a relay server on
+  port 443, the normal web port, which is how Google Meet gets through. Argus is free, and
+  the free relay it uses runs on port 3478, which those proxies block. The relays that run
+  on 443 all need a paid plan or a card, so the browser finds no way to connect.
+- **Is it safe?** Mostly, yes. With the protection off, the people in your room can see
+  your real IP address, because a direct connection needs one, just as in any
+  peer-to-peer call. Argus's server never sees the video or audio and doesn't store IP
+  addresses. Other sites you visit while it's off could read your IP too. So, where the
+  add-on allows it, exclude only this site, or turn the protection back on when you're
+  done.
+
+</details>
+
 ## How it works
 
 ```mermaid
